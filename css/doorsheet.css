@@ -1,0 +1,178 @@
+/*
+ * Base structure
+ */
+
+/* Move down content because we have a fixed navbar that is 50px tall */
+body {
+  padding-top: 50px;
+}
+
+
+/*
+ * Global add-ons
+ */
+
+.sub-header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+
+/*
+ * Sidebar
+ */
+.sidebar {
+	/* TODO: Make the side bar stand out a bit more */
+}
+
+/*
+ * Main content
+ */
+
+.main {
+  padding: 20px;
+}
+@media (min-width: 768px) {
+  .main {
+    padding-right: 40px;
+    padding-left: 40px;
+  }
+}
+.main .page-header {
+  margin-top: 0;
+}
+
+
+/*
+ * Placeholder dashboard ideas
+ */
+
+.placeholders {
+  margin-bottom: 30px;
+  text-align: center;
+}
+.placeholders h4 {
+  margin-bottom: 0;
+}
+.placeholder {
+  margin-bottom: 20px;
+}
+.placeholder img {
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.autocomplete-suggestions { border: 1px solid #999; background: #FFF; cursor: default; overflow: auto; -webkit-box-shadow: 1px 4px 3px rgba(50, 50, 50, 0.64); -moz-box-shadow: 1px 4px 3px rgba(50, 50, 50, 0.64); box-shadow: 1px 4px 3px rgba(50, 50, 50, 0.64); }
+.autocomplete-suggestion { padding: 2px 5px; white-space: nowrap; overflow: hidden; }
+.autocomplete-selected { background: #F0F0F0; }
+.autocomplete-suggestions strong { font-weight: normal; color: #3399FF; }
+
+.txinfo {
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background-color: #d9edf7;
+	border-color: #bce8f1;
+	color: #31708f;
+	padding-right:35px;
+}
+.txinfo .close {
+	position: relative;
+	top: -2px;
+	right: -21px;
+	color: inherit;
+}
+
+@keyframes progressindicator
+{
+from {background-color:#222;}
+to {background-color:red;}
+}
+/*Safari and Chrome:*/
+@-webkit-keyframes progressindicator
+{
+from {background-color:#222;}
+to {background-color:red;}
+}
+
+.inprogress {
+	animation:progressindicator 2s infinite;
+	/*Safari and Chrome:*/
+	-webkit-animation:progressindicator 2s infinite alternate;
+}
+
+@keyframes attention-info
+{
+from {background-color:#fcf8e3;}
+to {background-color:#8a6d3b;}
+}
+/*Safari and Chrome:*/
+@-webkit-keyframes attention-info
+{
+from {background-color:#fcf8e3;}
+to {background-color:#8a6d3b;}
+}
+
+@keyframes attention-warning
+{
+from {background-color:inherit;}
+to {background-color:#faebcc;}
+}
+/*Safari and Chrome:*/
+@-webkit-keyframes attention-warning
+{
+from {background-color:inherit;}
+to {background-color:#faebcc;}
+}
+
+@keyframes attention-danger
+{
+from {background-color:inherit;}
+to {background-color:#a94442;}
+}
+/*Safari and Chrome:*/
+@-webkit-keyframes attention-danger
+{
+from {background-color:inherit;}
+to {background-color:#a94442;}
+}
+
+.attention-info {
+	animation:attention-info 2s infinite alternate;
+	/*Safari and Chrome:*/
+	-webkit-animation:attention-info 2s infinite alternate;
+}
+
+.attention-warning {
+	animation:attention-warning 2s infinite alternate;
+	/*Safari and Chrome:*/
+	-webkit-animation:attention-warning 2s infinite alternate;
+}
+
+.attention-danger {
+	animation:attention-danger 1s infinite alternate;
+	/*Safari and Chrome:*/
+	-webkit-animation:attention-danger 1s infinite alternate;
+}
+
+.membership-gold {
+	background-color: gold;	
+}
+
+.membership-silver {
+	background-color: silver;	
+}
+
+.membership-standard {
+	background-color: inherit;	
+}
+
+.membership-trial {
+	background-color: inherit;
+}
+
+.membership-ooa, .membership-student, .membership-senior {
+	background-color: pink;	
+}
+
+/* This fixes a bug in datepicker */
+.datepicker {z-index: 1151 !important;}
