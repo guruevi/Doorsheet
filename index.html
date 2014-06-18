@@ -7,10 +7,11 @@
 <meta name="description" content="">
 <meta name="author" content="">
 <link rel="shortcut icon" href="favicon.ico">
-<title>Doorsheet v0.7b</title>
+<title>Doorsheet v0.8a</title>
 
 <!-- Bootstrap core CSS -->
-<link href="css/bootstrap.min.css" rel="stylesheet">
+<link href="css/bootswatch/default/bootstrap.min.css" rel="stylesheet"
+	id="bootstrap-link">
 
 <!-- Eternicode Bootstrap Datepicker CSS-->
 <link href="eternicode-bootstrap-datepicker/css/datepicker.css"
@@ -29,7 +30,7 @@
  <![endif]-->
 </head>
 
-<body class="table-hover">
+<body>
 	<!-- This is the top navbar -->
 	<div class="navbar navbar-inverse navbar-fixed-top" role="navigation"
 		id="top-navbar">
@@ -41,22 +42,58 @@
 						class="icon-bar"></span> <span class="icon-bar"></span> <span
 						class="icon-bar"></span>
 				</button>
-				<a class="navbar-brand" href="#">Doorsheet v0.7b</a>
+				<a class="navbar-brand" href="#">Doorsheet v0.8a</a>
 			</div>
 			<div class="navbar-collapse collapse">
 				<ul class="nav navbar-nav navbar-right">
-					<li><a href="#" id="load-events">Load Events</a></li>
-					<li><a href="#" id="show-main">Main</a></li>
-					<li><a href="#" id="show-transactions">Transactions</a></li>
-					<li><a href="#" id="show-reports">Reporting</a></li>
-					<li><a href="#" id="logout-user">Logout</a></li>
-					<li><a href="HOWTO.pdf" target="_blank" id="show-help">Help</a></li>
+					<li><a href="#" id="show-main"><span
+							class="glyphicon glyphicon-dashboard"></span> Main</a></li>
+					<li><a href="#" id="load-events"><span
+							class="glyphicon glyphicon-calendar"></span> Load Events</a></li>
+					<li><a href="#" id="show-transactions"><span
+							class="glyphicon glyphicon-transfer"></span> Transactions</a></li>
+					<li><a href="#" id="show-reports"><span
+							class="glyphicon glyphicon-list"></span> Reporting</a></li>
+
+					<li class="dropdown"><a class="dropdown-toggle"
+						data-toggle="dropdown" href="#" id="themes">Theme <span
+							class="caret"></span></a>
+						<ul class="dropdown-menu" aria-labelledby="themes">
+							<li><a class="style-toggle" data-themename="default">Default</a></li>
+							<li class="divider"></li>
+							<li><a class="style-toggle" data-themename="amelia">Amelia</a></li>
+							<li><a class="style-toggle" data-themename="cerulean">Cerulean</a></li>
+							<li><a class="style-toggle" data-themename="cosmo">Cosmo</a></li>
+							<li><a class="style-toggle" data-themename="cyborg"><span
+									class="glyphicon glyphicon-off"></span>Cyborg </a></li>
+							<li><a class="style-toggle" data-themename="darkly"><span
+									class="glyphicon glyphicon-off"></span>Darkly </a></li>
+							<li><a class="style-toggle" data-themename="flatly">Flatly</a></li>
+							<li><a class="style-toggle" data-themename="journal">Journal</a></li>
+							<li><a class="style-toggle" data-themename="lumen">Lumen</a></li>
+							<li><a class="style-toggle" data-themename="readable">Readable</a></li>
+							<li><a class="style-toggle" data-themename="simplex">Simplex</a></li>
+							<li><a class="style-toggle" data-themename="slate"><span
+									class="glyphicon glyphicon-off"></span>Slate </a></li>
+							<li><a class="style-toggle" data-themename="spacelab">Spacelab</a></li>
+							<li><a class="style-toggle" data-themename="superhero">Superhero</a></li>
+							<li><a class="style-toggle" data-themename="united">United</a></li>
+							<li><a class="style-toggle" data-themename="yeti">Yeti</a></li>
+						</ul></li>
+					<li class="dropdown"><a class="dropdown-toggle"
+						data-toggle="dropdown" href="#" id="user-actions"><span id="loggedinUsername">Not logged
+							in</span> <span class="caret"></span>
+					</a>
+						<ul class="dropdown-menu" aria-labelledby="user-actions">
+							<li><a href="#" id="refresh-data"><span
+									class="glyphicon glyphicon-refresh"></span> Re-Sync</a></li>
+							<li><a href="#" id="logout-user"><span
+									class="glyphicon glyphicon-log-out"></span> Logout</a></li>
+							<li><a href="HOWTO.pdf" target="_blank" id="show-help"><span
+									class="glyphicon glyphicon-question-sign"></span> Help</a></li>
+						</ul></li>
+
 				</ul>
-				<!--
- <form class="navbar-form navbar-right">
- <input type="text" class="form-control" placeholder="Search...">
- </form>
- -->
 			</div>
 		</div>
 	</div>
@@ -72,10 +109,12 @@
 					</div>
 					<div class="panel-body">
 						<div id="transaction-info"></div>
-						<div class="row">
-							<div class="col-md-6 badge" style="font-size: 28px;">TOTAL:</div>
-							<div class="col-md-6 badge" id="transaction-total"
-								style="font-size: 28px;">0.00</div>
+						<div class="well">
+							<div class="row">
+								<div class="col-md-6" style="font-size: 24px;">TOTAL:</div>
+								<div class="col-md-6 badge" id="transaction-total"
+									style="font-size: 28px;">0.00</div>
+							</div>
 						</div>
 						<div class="row">
 							<div class="col-md-6">
@@ -87,7 +126,7 @@
 								Credit<br>
 							</div>
 							<div class="col-md-6" style="min-height: 80px;">
-								<button type="button" class="btn btn-default btn-danger"
+								<button type="button" class="btn btn-sm btn-danger"
 									id="cancel-transaction" data-target="transaction-info"
 									style="position: absolute; top: 10px;">Cancel</button>
 								<button type="button" class="btn btn-default btn-success"
@@ -129,13 +168,10 @@
 						</div>
 						<div class="panel-body">
 							<div class="row">
-								<div class="col-md-8">
-									<div id="discountsAvailable">No contact loaded</div>
-								</div>
+								<div class="col-md-8" id="discountsAvailable">No Contact
+									Loaded</div>
 								<div class="col-md-2">
-									<!-- TODO: Implement reserving discounts for other transactions 
-								<button type="button" class="btn btn-default btn-warning" id="discount-reserve" data-target="transaction-info">Reserve</button>
-							 -->
+									<!-- Blank space to align with the other panels -->
 								</div>
 								<div class="col-md-2">
 									<button type="button" class="btn btn-default btn-success"
@@ -189,30 +225,8 @@
 						</div>
 					</div>
 				</form>
-				<form role="form" class="event-transaction"
-					id="event-transaction-template" style="display: none">
-					<div class="panel panel-default event-panel">
-						<div class="panel-heading">
-							<h2 class="panel-title">Event Title</h2>
-						</div>
-						<div class="panel-body">
-							<div class="row">
-								<div class="col-md-8">
-									<div class="event-priceFields"></div>
-								</div>
-								<div class="col-md-2 eventPriceContainer">
-									<span class="badge" style="font-size: 28px;">0.00</span>
-								</div>
-								<div class="col-md-2">
-									<button type="button" class="btn btn-default btn-success"
-										name="event-add" data-target="transaction-info">Add</button>
-								</div>
-							</div>
-						</div>
-					</div>
-				</form>
 			</div>
-			<div class="col-md-3" id="contact-search-container">
+			<div class="col-md-3 well" id="contact-search-container">
 				<div class="form-group">
 					<input type="hidden" id="contact-nickname" class="form-control">
 				</div>
@@ -264,7 +278,11 @@
 		style="display: none">
 		<div class="row">
 			<div class="col-md-12">
-				<h2 class="sub-header">Reports <a href="#" class="btn btn-primary btn-primary" id="mail-report"><span class="glyphicon glyphicon-envelope"></span> Mail to Board</a></h2>
+				<h2 class="sub-header">
+					Reports <a href="#" class="btn btn-primary btn-primary"
+						id="mail-report"><span class="glyphicon glyphicon-envelope"></span>
+						Mail to Board</a>
+				</h2>
 				<div id="report_participants_contrib">
 					<h3>Total Event Income:</h3>
 					<table style="width: 900px;"
@@ -425,7 +443,8 @@
 				<div class="modal-body">
 
 					<div class="progress progress-striped active">
-						<div class="progress-bar" role="progressbar" id="pleasewait-progress" style="width: 0%;"></div>
+						<div class="progress-bar" role="progressbar"
+							id="pleasewait-progress" style="width: 0%;"></div>
 					</div>
 
 				</div>

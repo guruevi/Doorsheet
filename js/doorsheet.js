@@ -1,48 +1,60 @@
 /**
  * Doorsheet.js
  * @author vanooste
- * @version 0.7b
+ * @version 0.8a
  * @license GPLv3
  */
 var debug = false;
-var version = "0.7b";
+var version = "0.8a";
 
-/* Dev Notes: 
+/** Dev Notes: 
  * To check whether something is empty use $.isEmptyObject which works similar to how PHP's empty() works http://jsfiddle.net/ivan_sim/N8TVV/13/ except it doesn't work on arrays
  * Do async stuff first in line, then while that is running, something else can run
  * Make sure to instantiate local variables using var
+ */
+
+/**
+ * This is our error handler
  */
 window.onerror = function(msg, url, line) {
 	//Let's hope the error sits not in print_error
 	print_error("Fatal Error - things have broken, reload the Doorsheet to continue: " + msg + "\nurl: " + url + "\nline #: " + line);
 
-	// TODO: Email the details of the errors or something, not sure
+	// TODO: Email the details of the errors or something, not sure what to do
 
 	// If you return true, then IE-style error alerts will be suppressed.
 	return false;
 };
 
+//Check whether we support Web Storage functions - Doorsheet doesn't work without it.
 if (typeof (Storage) == "undefined") {
 	// Sorry! No Web Storage support..
 	alert("This browser does not support Local Web Storage, things won't work!");
 }
 
-//Define object storage
+//JavaScript does not have an Object storage method. Only string. So stringify using JSON
+/**
+ * Define setObject method on the Storage prototype
+ */
 Storage.prototype.setObject = function (key, value) {
 	this.setItem(key, JSON.stringify(value));
 };
-
+/**
+ * Define getObject method on Storage prototype
+ */
 Storage.prototype.getObject = function (key) {
 	var value = this.getItem(key);
 	return value && JSON.parse(value);
 };
 
-//Always clean up old data in debug mode or if the versions changed
+//Always make sure to clean up old data in debug mode or if the versions changed
 var last_version = localStorage.getItem("version");
-if (last_version != version) {
+if (last_version != version || debug) {
+	//The versions changed, clear the storage
 	localStorage.clear();
+	//Store the new version number
+	localStorage.setItem("version", version);
 }
-localStorage.setItem("version", version);
 
 /**
  * A very fast (and safe) clear function
@@ -64,37 +76,42 @@ $(document).ajaxStart(function(){
 	$('#top-navbar').removeClass("inprogress");
 });
 
-
-var BaseURL = "https://your-drupal-base/";
+//Global variables
+/**
+ *  What is the Base URL for our source data - you can use a full URL here
+ * TODO: Make this dynamically update-able in a config screen
+ */
+var BaseURL = "/";
 /**
  * Where do we go to get our data
  * Add debug=1& to the URL for debugging purposes
- * Sequential=1 simply returns an array instead of an object of the results which makes things easier to parse in JavaScript
+ * Sequential=1 returns an array instead of an object of the results which makes things easier to parse using JavaScript array methods
  * TODO: Make this dynamically update-able in a config screen
  */
-var CRMRESTURL = BaseURL + "sites/all/modules/civicrm/extern/rest.php?json=1&sequential=1&key=your-api-key&options[limit]=1000";
+var CRMRESTURL = BaseURL + "sites/all/modules/civicrm/extern/rest.php?json=1&sequential=1&key=your-site-key&options[limit]=1000";
 /**
- * Save the original in case we logout
+ * Save the original URL so we can reset it in case we logout
  */
-var origCRMRESTURL = CRMRESTURL;
+var CRMRESTURLorig = CRMRESTURL;
 /**
- * Save the start time
+ * Save the start time of this script
  */
 var runStartTime = $.now();
 /**
  * Cache data for 12 hours
+ * TODO: Make this dynamically update-able in a config screen
  */
 var cacheTime = 43200000;
 /**
- * Get the last run time
+ * Get the last time this script ran
  */
 var lastrun = parseInt(localStorage.getItem("lastrun"));
 /**
- * Delay (in ms) between launching Ajax requests
+ * Delay (in ms) between launching multiple Ajax requests
  */
 var ajaxdelay = 100;
-//TODO: Show a UI when we last refreshed
-//TODO: Show a UI when we last ran this app
+//TODO: Show in UI when we last refreshed
+//TODO: Show in UI when we last ran this app
 
 /**
  * Set the ID of the price field collection in the database 
@@ -110,23 +127,36 @@ var trialMembershipId = 6;
  * This is the ID of the Board Membership, this is to show additional options to board members
  */
 var boardMembershipId = 1;
+/**
+ * Stores the logged in user object
+ */
 var LoggedInUser = null;
+/**
+ * Stores the logged in users' membership objects
+ */
 var LoggedInMemberships = null;
 
-
-//Global variables
+/**
+ * Current Contact is the one that has been searched in the list
+ */
 var currentContact = null;
+/**
+ * Current Contacts' membership
+ */
 var currentContactMembership = null;
-var StagedTransactions = [];
-var StagedTransactions_element = 0;
+/**
+ * Staged Transactions (in the transaction overview but not yet processed)
+ */
+var StagedTransactions = new StagedTransactions();
 
-//The current logged in user contact info should be stored in here
-//TODO: Attach a trigger to these variables so each time we update it, it automatically updates all the views, currently add_tx(), updateTotalView(), cancelTransaction() and the click handlers do this
-
-var StagedTransactions_totalPrice = 0.00;
-
+/**
+ * This is the pop up progressbar object. Can be called anywhere, it's just UI 
+ */
 var progressBar = new ProgressBar();
 
+/**
+ * The Caches are all in a single object which can be referred to easily
+ */
 var Caches = {};
 
 Caches.contacts = new Cache ("Contact");
@@ -149,6 +179,18 @@ Caches.pricefields.restore();
 Caches.pricefieldvalues = new Cache ("PriceFieldValue");
 Caches.pricefieldvalues.restore();
 
+/**
+ * This stores all the event panel objects
+ */
+var EventPanels = {};
+
+/**
+ * Set the preferred theme
+ */
+var currentTheme = localStorage.getItem("doorsheet-theme");
+if (currentTheme != null && currentTheme.length > 0) {
+	setTheme (currentTheme);
+}
 
 /**
  * Get the user_api_key stored in localStorage
@@ -240,14 +282,15 @@ function Cache(entity) {
 	this.empty = function () {
 		print_debug ("Emptying "+context.entity+" data and removing from localStorage");
 		context.data.clear();
+		context.lastfetch = 0;
 		return localStorage.removeItem(context.entity+"Cache");
 	};
 
 	this.lastfetch = $.now();
 
 	this.fetch = function (success_callback, fail_callback, always_callback) {
-		//At least wait 5 minutes before re-fetching
-		if (context.data.length > 0 && (context.lastfetch + 600 > $.now())) {
+		//At least wait 5 minutes before re-fetching - 5 min = 300000 milliseconds
+		if ((context.data.length > 0) && ((context.lastfetch + 300000) > $.now())) {
 			if (typeof success_callback == "function") {
 				success_callback.call();
 			}
@@ -320,13 +363,13 @@ function Cache(entity) {
 			sortfield = "id";
 		}
 		var filtered = context.getContactId(contact_id);
-		
+
 		if (typeof filterfield != 'undefined') {
 			filtered = filtered.filter(function (value) {
 				return value[filterfield] == filtervalue;
 			});
 		}
-		
+
 		var sorted = filtered.sort(function (a, b) {
 			//We typically want to sort from large to small
 			if (a[sortfield] < b[sortfield])
@@ -356,17 +399,21 @@ function Cache(entity) {
 		print_error("Object does not have feature Entity");
 	};
 
+	this.getByNickName = function (nick_name) {
+		print_error("Object does not have feature NickName");
+	};
+
 	this.getNickName = function (id) {
 		print_error("Object does not have feature NickName");
 	};
 
-	this.getEmail = function (id) {
+	this.getByEmail = function (email) {
 		print_error("Object does not have feature Email");
 	};
 
 	if (entity == "Contact") {
 		//Contacts need to be reloaded every time
-		this.getNickName = function (nick_name) {
+		this.getByNickName = function (nick_name) {
 			return context.data.filter(function (value) {
 				if (typeof value == "undefined") {
 					return false;
@@ -375,7 +422,16 @@ function Cache(entity) {
 			});
 		};
 
-		this.getEmail = function (email) {
+		this.getNickName = function (id) {
+			//Not all contacts have nick names
+			var nick_name = context.data[id].nick_name;
+			if (nick_name == "") {
+				return context.data[id].sort_name;
+			}
+			return nick_name;
+		};
+
+		this.getByEmail = function (email) {
 			return context.data.filter(function (value) {
 				if (typeof value == "undefined") {
 					return false;
@@ -398,31 +454,39 @@ function Cache(entity) {
 			//Custom_3 = credit 
 			//Custom_4 = rbucks
 			//custom_5 = guest passes
-			contact.banned = parseInt(contact.custom_1);
-			if (isNaN(contact.banned) || contact.banned == 0) {
-				contact.banned = false;
-			} else {
-				contact.banned = true;
+			if ("custom_1" in contact) {
+				contact.banned = parseInt(contact.custom_1);
+				if (isNaN(contact.banned) || contact.banned == 0) {
+					contact.banned = false;
+				} else {
+					contact.banned = true;
+				}
 			}
-			contact.guests = parseInt(contact.custom_2);
-			if (isNaN(contact.guests) || contact.guests > 0) {
-				contact.guests = true;
-			} else {
-				contact.guests = false;
+			if ("custom_2" in contact) {
+				contact.guests = parseInt(contact.custom_2);
+				if (isNaN(contact.guests) || contact.guests > 0) {
+					contact.guests = true;
+				} else {
+					contact.guests = false;
+				}
 			}
-
-			contact.credit = parseFloat(contact.custom_3);
-			contact.rbucks = parseInt(contact.custom_4);
-			contact.guestpasses = parseInt(contact.custom_5);
-
-			if (isNaN(contact.credit)) {
-				contact.credit = 0;
+			if ("custom_3" in contact) {
+				contact.credit = parseFloat(contact.custom_3);
+				if (isNaN(contact.credit)) {
+					contact.credit = 0;
+				}
 			}
-			if (isNaN(contact.rbucks)) {
-				contact.rbucks = 0;
+			if ("custom_4" in contact) {
+				contact.rbucks = parseInt(contact.custom_4);
+				if (isNaN(contact.rbucks)) {
+					contact.rbucks = 0;
+				}
 			}
-			if (isNaN(contact.guestpasses)) {
-				contact.guestpasses = 0;
+			if ("custom_5" in contact) {
+				contact.guestpasses = parseInt(contact.custom_5);
+				if (isNaN(contact.guestpasses)) {
+					contact.guestpasses = 0;
+				}
 			}
 
 			return master_addItem(contact);
@@ -494,6 +558,17 @@ function Cache(entity) {
 	return this;
 }
 
+function setTheme (themename) {
+	var link = $("#bootstrap-link");
+	link.attr("href", "css/bootswatch/"+themename+"/bootstrap.min.css");
+	localStorage.setItem("doorsheet-theme", themename);
+}
+
+$("a.style-toggle").click(function (e) {
+	e.preventDefault();
+	setTheme ($(this).data('themename'));
+});
+
 /**
  * Get all the participants for an event
  * @param event_id
@@ -522,7 +597,7 @@ function getParticipants_Contact(contact_id) {
  * Find out if a contact is already participant in the event - if so, return it's ID
  * @param contact_id
  * @param event_id
- * @return int 0 if not found or id
+ * @return Number 0 if not found or id
  */
 function getParticipantId_Contact_Event(contact_id, event_id) {
 	var event_participants = getParticipants_Event (event_id);
@@ -533,7 +608,7 @@ function getParticipantId_Contact_Event(contact_id, event_id) {
 			return false;
 		}
 	});
-	
+
 	return ret;
 }
 
@@ -704,7 +779,7 @@ function getReports() {
 			memberships = Caches.memberships.getContactId(contribution.contact_id);
 			$.each(memberships, function (idx, membership) {
 				if (membership.membership_type_id == trialMembershipId) {
-					//We paid in the last 24-something hours for a trial membership
+					//We paid in 12-something hours away from the current event
 					new_members++;
 				}
 			});
@@ -872,15 +947,6 @@ function getParticipantPayment_Contribution(contribution_id) {
 }
 
 /**
- * 
- */
-function getTransactionsDb() {
-	$("#transactions-table tbody").empty();
-	//TODO: Get the last few transactions from the database and represent them here
-
-}
-
-/**
  * This initializes all the data. Call this after logging in.
  */
 function init() {
@@ -923,10 +989,8 @@ function init() {
 
 //Load Events Click Handler
 $("#load-events").click(function (event) {
-	cancelStagedTransactions();
-
+	StagedTransactions.clear();
 	$("#load-events-modal").modal('show');
-	//Put membership stuff in panels
 });
 
 
@@ -945,13 +1009,12 @@ function putEventsInModal() {
 	var now = moment();
 	var back = moment(now).subtract('days', 14);
 	var forward = moment(now).add('days', 14);
-	
+
 	if (debug) {
 		back = moment(now).subtract('days', 300);
 		forward = moment(now).add('days', 300);
 	}
-		
-	
+
 	data = Caches.events.data.filter(function (element) {
 		//Test to see if we should even bother about these events
 		if (moment(element.start_date).isBefore(back) || moment(element.end_date).isAfter(forward)) {
@@ -976,23 +1039,23 @@ function putEventsInModal() {
 				//Because of how our cache works (arrays) database ID's that are missing will be empty/undefined objects
 				return;
 			}
-			
+
 			var label = $("<label><input name='event-id[]' type='checkbox' value='" + 
 					value.id + "' data-contributiontypeid='" + value["contribution_type_id"] + 
 					"' data-eventtypeid='" + value["event_type_id"] + 
 					"' data-event-title='" + value["event_title"] + 
 					"' data-startdate='"+value["start_date"]+"'> "
 					+ value["event_title"] + " ("+value["start_date"]+")</label><br>");
-			
+
 			var timeago = moment(value.start_date).diff(now, 'days');
-			
+
 			if (timeago <= -1) {
 				label.css("text-decoration","line-through");
 			} else if (timeago <= 1) {
 				label.css("color","green");
 			}
 			$("#load-events-form .modal-body").append(label);
-			
+
 		});
 	}
 	//Attach a submit handler to the form
@@ -1003,7 +1066,7 @@ function putEventsInModal() {
 		//For each event checked
 		$("#load-events-form input[name='event-id[]']:checked").each(function () {
 			var event_id = $(this).val();
-			putEventInPanels(event_id);
+			EventPanels[event_id] = new EventPanel(event_id);
 		});
 
 		$("#load-events-modal").modal('hide');
@@ -1093,7 +1156,6 @@ function putMembershipTypesInPanel() {
 	//Special is reserved for board members only
 	var specialLabel = $("<label><input name='membership-type-option' type='radio' value='Special'> Special</label>");
 
-	print_debug (Caches.membershiptypes.data);
 	$.each(Caches.membershiptypes.data, function (index, membershiptype) {
 		if ($.isEmptyObject(membershiptype)) {
 			return;
@@ -1206,8 +1268,8 @@ $("#custom-membership-form").submit(function (event) {
 	data.fields = {};
 	data.type = "membership";
 	data.price = parseFloat($("#custom-membership-price").val());
-	data.contactId = currentContact.id;
-	data.fields.membership_source = "Custom Doorsheet";
+	data.contactid = currentContact.id;
+	data.fields.membership_source = "Custom Doorsheet v" + version;
 	data.fields.membership_contact_id = currentContact.id;
 	if (currentContactMembership == null) {	
 		data.fields.membership_start_date = formatDate("", "database");
@@ -1220,15 +1282,102 @@ $("#custom-membership-form").submit(function (event) {
 	}
 	data.fields.membership_type_id = $("#custom-membership-type").val();
 	data.fields.membership_end_date = formatDate($("#custom-membership-enddate").val(), "database");
-	add_tx ("Custom Membership", data);
+	StagedTransactions.add (data);
 }); 
 
+function StagedTransactions () {
+	var context = this;
+	this.data = [];
+	this.total = 0;
 
-/**
- * Total price is set on StagedTransactions_totalPrice - updates the view based on this data
- */
-function updateTotalView() {
-	$("#transaction-total").empty().append(parseFloat(StagedTransactions_totalPrice).toFixed(2)); //toFixed transforms this into a string
+	this.add = function (transaction) {
+		if (!("type" in transaction) || transaction.type == "") {
+			print_error("BUG: No type passed into the transaction");
+			return false;
+		}
+		if (!("contactid") in transaction || transaction.contactid == 0) {
+			print_error ("BUG: No contactid passed into the transaction");
+			return false;
+		}
+		if (!("price") in transaction) {
+			print_error ("BUG: No price passed into the transaction");
+			return false;
+		}
+		if (transaction.price != 0 && !("fields" in transaction)) {
+			print_error("BUG: A price passed but no fields to update in the database");
+			return false;
+		}
+		print_debug (transaction);
+		var text = Caches.contacts.getNickName(transaction.contactid) + ": $" + parseFloat(transaction.price).toFixed(2);
+		var txid = context.data.push(transaction) - 1;
+		var dismiss_button = $("<button type='button' class='close' data-dismiss='alert' aria-hidden='true' data-txid='"+txid+"'>&times;</button>");
+		dismiss_button.click(function (event) {
+			StagedTransactions.remove($(this).data("txid"));
+		});
+
+		switch (transaction.type) {
+		case "discount":
+			if ("credit" in transaction.fields && transaction.fields.credit != 0) {
+				text += '<br>$' + parseFloat(transaction.fields.credit).toFixed(2) +  ' Credit';
+			}
+			if ("rbucks" in transaction.fields && transaction.fields.rbucks != 0) {
+				text += '<br>' + transaction.fields.rbucks +  ' RBucKS';
+			}
+			if ("guestpasses" in transaction.fields && transaction.fields.guestpasses != 0) {
+				text += '<br>' + transaction.fields.guestpasses +  ' Guest Pass(es)';
+			}
+			break;
+		case "event":
+			text += " - " + Caches.events.data[transaction.fields.event_id].title;
+			break;
+		case "membership":
+			text += " - " + Caches.membershiptypes.data[transaction.fields.membership_type_id].name + " Membership";
+			break;
+		default:
+			print_error("BUG: Invalid type passed into the transaction");
+		}
+
+		var txdiv = $("<div class='txinfo' id='StagedTx-"+txid+"'>" + text + "</div>").prepend(dismiss_button);
+		$("#transaction-info").append(txdiv);
+
+		context.total += transaction.price;
+		context.updateView();
+		return txid;
+	};
+
+	this.remove = function (id) {
+		$('#StagedTx-' + id).remove();
+		context.total -= context.data[id].price;
+		delete context.data[id];
+		context.updateView();
+	};
+
+	this.clear = function () {
+		context.data.clear();
+		context.total = 0;
+		context.updateView();
+		$("#transaction-info").empty();
+	};
+
+	this.updateView = function () {
+		$("#transaction-total").text(parseFloat(context.total).toFixed(2)); //toFixed transforms this into a string
+		if (context.total > 0) {
+			$("#transaction-total").addClass('attention-quick');
+		} else {
+			$("#transaction-total").removeClass('attention-quick');
+		}
+	};
+
+	this.refresh = function () {
+		context.total = 0;
+		for (var i = 0; i < context.data.length; i++) {
+			if (typeof(context.data[i]) == "undefined") {
+				continue;
+			}
+			context.total += context.data[i].price;
+		}
+		context.updateView();
+	};
 }
 
 /**
@@ -1239,70 +1388,34 @@ function prepare_member_tx(dataObj) {
 	//Make sure we're not accidentally passing objects or strings 
 	var price = parseFloat(dataObj["amount"]);
 	var memberType = parseInt(dataObj["membershipType"]);
-	var txlabel = dataObj["txlabel"];
 
 	//Name:
 	var data = {};
 	data.type = "membership";
 	data.price = price;
-	data.contactId = currentContact.id;
+	data.contactid = currentContact.id;
 	data.fields = {};
 
 	/*
 	 * membership_contact_id=3&membership_type_id=2&status_id=1&id=4&membership_end_date=2014
 	 */
 	if (currentContactMembership != null) {
-		//There is a current membership for this contact - create should update
-		data.membershipId = currentContactMembership.id;
+
 		data.fields.id = data.membershipId;
-		data.fields.membership_contact_id = data.contactId;
+		data.fields.membership_contact_id = data.contactid;
 		data.fields.status_id = 2;
 	} else {
 		//New membership should have a start date
 		data.fields.membership_start_date = formatDate($("#membership-startDate").val(), "database");
 		data.fields.join_date = data.fields.membership_start_date;
 		data.fields.membership_source = "Doorsheet " + version;
-		data.fields.membership_contact_id = data.contactId;
+		data.fields.membership_contact_id = data.contactid;
 		data.fields.status_id = 1;
 	}
 	data.fields.membership_type_id = memberType;
 	data.fields.membership_end_date = formatDate($("#membership-endDate").val(), "database");
 	//Save this transaction into the local transaction list
-	add_tx(currentContact.nick_name + ": " + txlabel, data);
-}
-
-/**
- * Prepare an Event transaction
- * @param eventId
- * @param contributionTypeId
- * @param price
- * @param txlabel
- */
-function prepare_event_tx(eventId, contributionTypeId, price, txlabel) {
-	//Make sure we're not accidentally passing objects or strings 
-	price = parseFloat(price);
-	if (isNaN(price)) {
-		price = 0;
-	}
-	contributionTypeId = parseInt(contributionTypeId);
-	eventId = parseInt(eventId);
-
-	//Save this transaction into the local transaction list
-	var passdata = {
-			"price": price,
-			"type": "event",
-			"contactId": currentContact.id };
-	passdata.fields = {};
-	passdata.fields.participant_contact_id = currentContact.id;
-	passdata.fields.contact_id = currentContact.id;
-	passdata.fields.event_id = eventId;
-	passdata.fields.participant_status_id = 2; //1 = Registered, 2 = Attended
-	passdata.fields.participant_source = "Doorsheet Participant v"+version;
-	passdata.fields.participant_register_date = formatDate("", "db-time");
-	passdata.fields.participant_role_id = 1; 
-	passdata.fields.participant_fee_currency = "USD";
-
-	add_tx("Attending " + txlabel + ": " + currentContact.nick_name, passdata);
+	StagedTransactions.add(data);
 }
 
 /**
@@ -1315,34 +1428,36 @@ function submitTransaction(paymentData) {
 	 * We bind the discountAvailable to this function so we use the same shared variable
 	 */
 	var discountAvailable = 0;
-	$.each(StagedTransactions, function (key, jsonelement) {
-		if (typeof jsonelement == "undefined") {
+	$.each(StagedTransactions.data, function (key, transaction) {
+		if (typeof transaction == "undefined") {
 			//If we partially cancel a transaction, individual elements may be undefined
 			return;
 		}
 
-		//Transaction is a JSON element
-		var transaction = JSON.parse(jsonelement);
 		if (transaction.type == "discount") {
-
 			print_debug ("Processing discount");
 			discountAvailable += parseFloat(transaction.price);
 			var query = {};
 			query.entity="Contact";
 			query.action="create";
-			query.id=transaction.contactId;
-			if (transaction.fields.credit > 0) {
+			query.id=transaction.contactid;
+			if ("credit" in transaction.fields && transaction.fields.credit != 0) {
 				//We need to parseFloat and then toFixed so we don't get multiple digits after the comma (rounding errors) which the database doesn't like
-				query.custom_3 = parseFloat(parseFloat(getCustomValue(transaction.contactId, 3)) - parseFloat(transaction.fields.credit)).toFixed(2);
+				query.custom_3 = parseFloat(parseFloat(getCustomValue(transaction.contactid, 3)) - parseFloat(transaction.fields.credit)).toFixed(2);
+				//Make sure to set the new data on the contact so we can reuse it for the next transaction
+				//logTransactions does this as well but since this is async, we need to make sure the next loop has correct data
 				Caches.contacts.data[query.id].custom_3 = query.custom_3;
+				Caches.contacts.data[query.id].credit= query.custom_3;
 			}
-			if (transaction.fields.rbucks > 0) {
-				query.custom_4 = parseInt(getCustomValue(transaction.contactId, 4)) - parseInt(transaction.fields.rbucks);
+			if ("rbucks" in transaction.fields && transaction.fields.rbucks != 0) {
+				query.custom_4 = parseInt(getCustomValue(transaction.contactid, 4)) - parseInt(transaction.fields.rbucks);
 				Caches.contacts.data[query.id].custom_4 = query.custom_4;
+				Caches.contacts.data[query.id].rbucks = query.custom_4;
 			}
-			if (transaction.fields.guestpasses > 0) {
-				query.custom_5 = parseInt(getCustomValue(transaction.contactId, 5)) - parseInt(transaction.fields.guestpasses);
+			if ("guestpasses" in transaction.fields && transaction.fields.guestpasses > 0) {
+				query.custom_5 = parseInt(getCustomValue(transaction.contactid, 5)) - parseInt(transaction.fields.guestpasses);
 				Caches.contacts.data[query.id].custom_5 = query.custom_5;
+				Caches.contacts.data[query.id].guestpasses = query.custom_5;
 			}
 
 			$.ajax({
@@ -1364,43 +1479,41 @@ function submitTransaction(paymentData) {
 		}
 	});
 
-	$.each(StagedTransactions, function (key, jsonelement) {
-		if (typeof jsonelement == "undefined") {
+	$.each(StagedTransactions.data, function (key, transaction) {
+		if (typeof transaction == "undefined") {
 			return;
 		}
-		var element = JSON.parse(jsonelement);
-		if (!("type" in element)) {
+		if (!("type" in transaction)) {
 			print_error("BUG: Attempted transaction execution without a type");
 			return;
 		}
-		if (element.type == "discount") {
+		if (transaction.type == "discount") {
 			//We don't process discounts here
 			return;
 		}
 
-		element.paymentData = paymentData;
-		element.price = parseFloat(element.price);
-		element.discountUsed = 0;
-		element.discountType = 6; //Instrument Type 6 = RBucKS
-		if (element.price > 0 && discountAvailable < 0) {
-			if ((element.price + discountAvailable) <= 0) {
+		transaction.paymentData = paymentData;
+		transaction.price = parseFloat(transaction.price);
+		transaction.discountUsed = 0;
+		transaction.discountType = 6; //Instrument Type 6 = RBucKS
+		if (transaction.price > 0 && discountAvailable < 0) {
+			if ((transaction.price + discountAvailable) <= 0) {
 				//This happens when the discount is greater than the individual price
-				
-				discountAvailable += element.price;
-				element.discountUsed = element.price; //We got the entire price as a discount
-				element.price = 0; //THE ORDER OF THESE 2 LINES IS IMPORTANT!
+
+				discountAvailable += transaction.price;
+				transaction.discountUsed = transaction.price; //We got the entire price as a discount
+				transaction.price = 0; //THE ORDER OF THESE 2 LINES IS IMPORTANT!
 			} else {
-				element.price += discountAvailable;
-				element.discountUsed = discountAvailable * -1; //Discount is a negative value
+				transaction.price += discountAvailable;
+				transaction.discountUsed = discountAvailable * -1; //Discount is a negative value
 				discountAvailable = 0;
 			}
 		}
-		element.price = parseFloat(element.price).toFixed(2);
 
-		print_debug (element);
-		execTransaction(element);
+		print_debug (transaction);
+		execTransaction(transaction);
 	});
-	cancelStagedTransactions();
+	StagedTransactions.clear();
 }
 
 /**
@@ -1430,8 +1543,9 @@ function execTransaction(element) {
 		paymentData.financialTypeId = 2; //2 = Member dues
 		query.entity = "Membership";
 		query.action = "create";
-		if ("membershipId" in element) {
-			query.id = element.membershipId;
+		if ("id" in element.fields) {
+			//This is an update rather than a new one
+			query.id = element.fields.id;
 		} else {
 			query.membership_start_date = element.fields.membership_start_date;
 			query.join_date = element.fields.join_date;
@@ -1455,7 +1569,7 @@ function execTransaction(element) {
 		query.participant_contact_id = parseInt(element.fields.participant_contact_id);
 		query.contact_id = query.participant_contact_id;
 		query.event_id = element.fields.event_id;
-		
+
 		//See if we are already registered
 		var thisparticipant_id = getParticipantId_Contact_Event(query.contact_id, query.event_id);
 		if (thisparticipant_id > 0) {
@@ -1483,7 +1597,7 @@ function execTransaction(element) {
 	break;
 	}
 	paymentData.price = parseFloat(element.price);
-	paymentData.contactId = parseInt(element.contactId);
+	paymentData.contactid = parseInt(element.contactid);
 	paymentData.instrumentType = parseInt(element.paymentData.instrumentType);
 	paymentData.discountUsed = parseFloat(element.discountUsed);
 	paymentData.discountType = parseInt(element.discountType);
@@ -1560,6 +1674,16 @@ function logTransaction(query, textStatus) {
 		cache = Caches.contacts;
 		if (typeof query.last_name != "undefined" && typeof query.first_name != "undefined") {
 			query.sort_name = query.last_name + ", " + query.first_name;
+		}
+		//Make sure we don't mess up things that are still looping
+		if ("custom_3" in query) {
+			delete query.custom_3;
+		}
+		if ("custom_4" in query) {
+			delete query.custom_4;
+		}
+		if ("custom_5" in query) {
+			delete query.custom_5;
 		}
 		url = "?q=civicrm/contact/view&reset=1&cid="+query.id;
 		break;
@@ -1671,7 +1795,7 @@ function createContribution(paymentData, data_id) {
 	contribQuery.entity = "Contribution";
 	contribQuery.action = "create";
 	contribQuery.financial_type_id = paymentData.financialTypeId;
-	contribQuery.contact_id = paymentData.contactId;
+	contribQuery.contact_id = paymentData.contactid;
 	contribQuery.currency = "USD";
 	contribQuery.receive_date = formatDate("", "db-time");
 	contribQuery.total_amount = paymentData.price;
@@ -1785,7 +1909,7 @@ function createParticipantPayment(contributionId, participantId) {
 		dataType: "json"})
 		.done(function(data, textStatus) {
 			var errorMsg = "Error processing "+query.entity+", please re-submit last "+query.entity+" transaction";
-			var successMsg = "Successfully registered membership payment";
+			var successMsg = "Successfully registered participant payment";
 			if (!test_apidata_error(data, successMsg, errorMsg)) {
 				//Nothing was done, alert
 				rollbackParticipant(participantId);
@@ -1895,53 +2019,6 @@ function rollbackContribution (contributionId) {
 }
 
 /**
- * @param humanText
- * @param data
- * @returns {Boolean}
- */
-function add_tx(humanText, data) {
-	if (!("type" in data) || data["type"] == "") {
-		print_error("BUG: A transaction was passed without type");
-		return false;
-	}
-	if (data["price"] != 0 && !("fields" in data)) {
-		print_error("BUG: A price passed but no fields to put in the database");
-		return false;
-	}
-	/**
-	 * Allow dismissing individual transactions
-	 */
-	var dismiss_button = $("<button type='button' class='close' data-dismiss='alert' aria-hidden='true' data-price='0.00'>&times;</button>");
-	if (data["price"] != 0) {
-		StagedTransactions_totalPrice = StagedTransactions_totalPrice + data["price"];
-		updateTotalView();
-		dismiss_button.data("price", data["price"]);
-		humanText = humanText + " - $" + data["price"].toFixed(2);
-	}
-	//Make sure we count down again, attach a click handler
-	StagedTransactions_element++;
-	StagedTransactions[StagedTransactions_element] = JSON.stringify(data); //Make sure we're not passing references
-	dismiss_button.data("stagedtxid", StagedTransactions_element);
-	dismiss_button.click(cancelStagedTx);
-
-	/**
-	 * This is the transaction div
-	 */
-	var txdiv = $("<div class='txinfo'>" + humanText + "</div>").append(dismiss_button);
-	//txdiv should have the data attached somehow?
-	$("#transaction-info").append(txdiv);
-}
-
-/**
- * 
- */
-function cancelStagedTx (event) {
-	StagedTransactions_totalPrice = StagedTransactions_totalPrice - parseFloat($(this).data("price")); //Price may come back as a string
-	delete StagedTransactions[$(this).data("stagedtxid")];
-	updateTotalView();
-}
-
-/**
  * Process the login of a user and loads the associated data
  * @param username
  * @param api_key
@@ -1962,7 +2039,7 @@ function login_user (username, api_key) {
 			localStorage.setItem("user_api_key", temp_key);
 			localStorage.setItem("user_login", username);
 		}
-		CRMRESTURL = origCRMRESTURL + "&api_key=" + temp_key;
+		CRMRESTURL = CRMRESTURLorig + "&api_key=" + temp_key;
 		setLoggedInUser(username);
 		init();
 		$("#login-modal").modal('hide');
@@ -2055,8 +2132,7 @@ function putContactsInSearchPanel () {
 	});
 
 	$("#contact-nickname, #contact-email, #contact-name").change(function (event) {
-		var id = $(this).val();
-		changeActiveContact(id); //This does async stuff, do it first
+		changeActiveContact($(this).val()); //Change the current contact
 	});
 }
 
@@ -2069,7 +2145,7 @@ function logout_user () {
 }
 
 function setLoggedInUser (nick_name) {
-	var lock = $("input, a");
+	var lock = $("input");
 	if(Caches.memberships.data.length != 0 && Caches.contacts.data.length != 0) {
 		//Wait until all the caches we need are filled
 		var user = Caches.contacts.data.filter(function (contact) {
@@ -2095,6 +2171,7 @@ function setLoggedInUser (nick_name) {
 		if (islocked_uiobject(lock)) {
 			unlock_uiobject(lock);
 		}
+		$("#loggedinUsername").text(LoggedInUser.nick_name);
 	} else {
 		if (!islocked_uiobject(lock)) {
 			lock_uiobject(lock);
@@ -2103,17 +2180,6 @@ function setLoggedInUser (nick_name) {
 		setTimeout(function () {setLoggedInUser(nick_name);}, 250);
 	}
 }
-/**
- * Cancels all the transactions that are pending and sets everything to 0
- */
-function cancelStagedTransactions() {
-	$("#transaction-info").empty();
-	StagedTransactions_totalPrice = 0;
-	StagedTransactions_element = 0;
-	StagedTransactions.clear();
-	updateTotalView();
-}
-
 /**
  * This functions prints a system-facing message for debugging purposes
  * This can usually be read using some type of developer mode or firebug
@@ -2220,11 +2286,11 @@ function changeActiveContact(contact_id) {
 	$("#success").hide();
 	$("#warning").hide();
 	$("#debug").hide();
-	
+
 	//Get the membership data
 	currentContact = getContact(contact_id);
 	currentContactMembership = null;
-	
+
 	putMembershipsInPanel();
 	putLastPaymentsInPanel ();
 	putLastParticipantsInPanel ();				
@@ -2254,7 +2320,7 @@ function putLastParticipantsInPanel () {
 	var placeholder = $("#contact-prevevent-info").empty();
 
 	var arr = Caches.participants.getLast(currentContact.id, 5, "participant_register_date", "participant_status_id", "2");
-	
+
 	if (arr.length > 0) {
 		$.each(arr, function (index, value) {
 			placeholder.append("<div>"+value.event_title+": "+value.participant_fee_amount + " " + moment(value.participant_register_date).calendar() + "</li>");
@@ -2389,6 +2455,7 @@ function putMembershipsInPanel() {
 	$("#discountsAvailable").empty();
 	$("#membership-info").append('<a href="https://crmv1.rochesterkinksociety.com/index.php?q=civicrm/contact/view&reset=1&cid='+contact_id+'" target="_blank">Contact ID: ' + contact_id + '</a><br>');
 	$("#membership-info").removeClass().addClass("panel-body"); //Delete all the alert styles, restore panel-body
+	$("body").removeClass();
 
 	var memberships = Caches.memberships.getContactId(contact_id);
 	var trialMemberInput = $("#membershipType input[value='" + trialMembershipId + "']");
@@ -2400,45 +2467,72 @@ function putMembershipsInPanel() {
 			print_debug ("Processing membership");
 			//WARNING: Index is not an ID
 			//TODO: membership_type_id should dynamically hide and show prices/permissions
-
-			switch (value["membership_type_id"]) {
-			case "1":
+			switch (parseInt(value["membership_type_id"])) {
 			case 1:
-			case "2":
+				//Board
 			case 2:
 				//Gold
+			case 7:
+				//Honorary
 				$("#membership-info").addClass("membership-gold");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToFree();
+				});
 				break;
-			case "3":
 			case 3:
 				//Standard
+			case 8:
+				//Staff
 				$("#membership-info").addClass("membership-standard");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToMemberPrice();
+				});
 				break;
-			case "4":
 			case 4:
 				//Senior
 				$("#membership-info").addClass("membership-senior");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToDiscountPrice();
+				});
 				break;
-			case "5":
 			case 5:
 				//Student
 				$("#membership-info").addClass("membership-student");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToDiscountPrice();
+				});
 				break;
-			case "6":
 			case 6:
 				//Trial
 				$("#membership-info").addClass("membership-trial");
 				//Make sure to warn so we don't sign up guests
 				$("#membership-info").addClass("attention-warning");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToMemberPrice();
+				});
 				break;
-			case "11":
+			case 10:
+				//Friend of RKS
 			case 11:
 				//OOA
 				$("#membership-info").addClass("membership-ooa");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToDiscountPrice();
+				});
+				break;
+			case 12:
+				//Hiatus
+				$("#membership-info").addClass("attention-info");
+				$.each(EventPanels, function (index, eventpanel) {
+					eventpanel.setToGuestPrice();
+				});
 				break;
 			default:
-				//This is a non-public membership type - flash attention info 
+				//This is a non-standard membership type - flash attention info, set to member price 
 				$("#membership-info").addClass("attention-info");
+			$.each(EventPanels, function (index, eventpanel) {
+				eventpanel.setToMemberPrice();
+			});
 			break;		
 			}
 			$("#membership-info").append("Type: " + value["membership_name"] + "<br>");
@@ -2477,6 +2571,9 @@ function putMembershipsInPanel() {
 		$("#membership-priceFields label[data-membershipcategory]").hide();
 		$("#membership-priceFields input[data-membership-type='" + trialMembershipId + "']").prop("checked", true);
 		$("#membership-priceFields label[data-membershipcategory='" + trialMembershipId + "']").show();
+		$.each(EventPanels, function (index, eventpanel) {
+			eventpanel.setToGuestPrice();
+		});
 	}
 
 	//Set the default price depending on membership type
@@ -2484,9 +2581,11 @@ function putMembershipsInPanel() {
 
 	if (contact.banned) {
 		$("#membership-info").append("INDIVIDUAL NOT APPROVED!<br>");
+		$("body").addClass("attention-danger");
 	}
 	if (!contact.guests) {
 		$("#membership-info").append("NO GUESTS ALLOWED!<br>");
+		$("body").addClass("attention-warning");
 	}
 	if (contact.credit) {
 		$("#membership-info").append("Has $" + contact.credit + " credit<br>");
@@ -2494,12 +2593,19 @@ function putMembershipsInPanel() {
 	}
 	if (contact.rbucks) {
 		$("#membership-info").append("Has " + contact.rbucks + " RBucKS<br>");
+		$("#discountsAvailable").append("<label>RBucKS:&nbsp;&nbsp;<input type='number' name='rbucks' value='0' max='" + contact.rbucks + "' min='0'></label><br>");
+	} else {
+		$("#membership-info").append("Has no RBucKS<br>");
+		$("#discountsAvailable").append("Has no RBucKs<br>");
 	}
+
 	if (contact.guestpasses) {
 		$("#membership-info").append("Has " + contact.guestpasses + " guest passes<br>");
+		$("#discountsAvailable").append("<label>Guest Passes:&nbsp;&nbsp;<input type='number' name='guestpasses' value='0' max='" + contact.guestpasses + "' min='0'></label><br>");
+	} else {
+		$("#membership-info").append("Has no Guest Passes<br>");
+		$("#discountsAvailable").append("Has no Guest Passes<br>");
 	}
-	$("#discountsAvailable").append("<label>RBucKS: <input type='number' name='rbucks' value='0' max='" + contact.rbucks + "' min='0'></label><br>");
-	$("#discountsAvailable").append("<label>Guest Passes: <input type='number' name='guestpasses' value='0' max='" + contact.guestpasses + "' min='0'></label><br>");
 
 }
 
@@ -2528,13 +2634,13 @@ function updateContact (id, nickname, firstname, lastname, email ) {
 		query.contact_type = "Individual"; //No ID was specified, Contact type is Individual
 		this.successMsg = "Successfully created Contact";
 		this.errorMsg = "Error creating Contact";
-		if (Caches.contacts.getEmail(email).length > 0) {
+		if (Caches.contacts.getByEmail(email).length > 0) {
 			if (!confirm("A contact with this e-mail address already exists, are you sure you want to continue?")) {
 				print_error(this.errorMsg + ": Duplicate e-mail");
 				return false;
 			}
 		}
-		if (Caches.contacts.getNickName(nickname).length > 0) {
+		if (Caches.contacts.getByNickName(nickname).length > 0) {
 			alert ("A contact with this scene name already exists; contact creation cancelled");
 			print_error(this.errorMsg + ": Duplicate scene name");
 			return false;
@@ -2619,115 +2725,157 @@ $('#contact-change').click(function (event) {
 	$('#contact-modal').modal('show');
 });
 
-function putEventInPanels (event_id) {
-	if (Caches.events.data.length == 0 || Caches.pricefieldvalues.data.length == 0 || Caches.pricefields.data.length == 0 || Caches.pricesets.data.length == 0) {
-		setTimeout(putEventInPanels, 250);
-		return;
-	}
+function EventPanel (event_id) {
+	var context = this;
 
-	var event = Caches.events.data[event_id];
+	this.setPrice = function (num) {
+		context.currentPrice = num;
+		context.eventPriceContainer.text(parseFloat(num).toFixed(2));
+	};
 
-	var eventTitle = event.event_title;
-	var financialTypeId = event.financial_type_id;
-	var contributionTypeId = event.contribution_type_id;
+	this.getPrice = function (num) {
+		return context.currentPrice;
+	};
 
-	var newEventForm = $("#event-transaction-template").clone().attr("id", "event-transaction-" + event_id).data("eventid", event_id).show();
+	this.setToMemberPrice = function () {
+		context.setPrice(context.defaultPrice);
+		context.defaultPriceInput.prop('checked', true);
+	};
 
-	//Get the pricefieldvalues associated with this event entity
-	var thisTypePrices = Caches.pricefieldvalues.getEntity(event_id);
+	this.setToGuestPrice = function () {
+		context.setPrice(context.guestPrice);
+		context.guestPriceInput.prop('checked', true);
+	};
 
-	switch (event.event_type_id) {
-	case "2":
-	case 2:
-		//2 is Party!
-		newEventForm.find(".panel-title").empty().append("Party Fee: " + eventTitle);
-		break;
-	case "4":
-	case 4:
-		//4 is meeting
-		newEventForm.find(".panel-title").empty().append("Munch Attendance: " + eventTitle);
-		break;
-	case "6":
-	case 6:
-		//6 is Workshop
-	default:
-		//Workshop of sorts
-		//Find the price set
-		newEventForm.find(".panel-title").empty().append("Workshop Fee: " + eventTitle);
-		break;
-	}
+	this.setToDiscountPrice = function () {
+		context.setPrice(context.discountPrice);
+		context.discountPriceInput.prop('checked', true);
+	};
 
-	//Add Event Price Types
-	var thisButton = newEventForm.find("button[name='event-add']");
+	this.setToFree = function () {
+		context.setPrice(0);
+		context.freePriceInput.prop('checked', true);
+	};
 
-	if (thisTypePrices.length > 0) {
-		$.each(thisTypePrices, function (index, price) {
-			var is_def = "";
+	//Get the Event from the database
+	this.event = Caches.events.data[event_id];
+	//Get the PriceFieldValues associated with this Event ID
+	var pricefieldvalues = Caches.pricefieldvalues.getEntity(event_id);
+
+
+	var form = $('<form role="form" class="event-transaction" id="event-transaction-'+event_id+'">');
+
+	//We want this form to be attached to the transaction-container
+	$("#transaction-container").prepend(form);
+
+	var panel = $('<div class="panel panel-default event-panel"></div>');
+	form.append(panel);
+
+	var paneltitle = $('<h2 class="panel-title">'+this.event.title+'</h2>');
+
+	var panelhead = $('<div class="panel-heading"></div>');
+	panelhead.append(paneltitle);
+
+	var panelbody = $('<div class="panel-body"></div>');
+
+	panel.append(panelhead);
+	panel.append(panelbody);
+
+	var row = $('<div class="row"></div>');
+	var eventPriceOptionsContainer = $('<div class="col-md-8"></div>');
+	var col_mid = $('<div class="col-md-2"></div>');
+	var col_right = $('<div class="col-md-2"></div>');
+	row.append(eventPriceOptionsContainer).append(col_mid).append(col_right);	
+	panelbody.append(row);
+
+	this.eventPriceContainer = $('<span class="badge" style="font-size: 28px;">0.00</span>');
+	this.addButton = $('<button type="button" class="btn btn-default btn-success" name="event-add" data-target="transaction-info">Add</button>');
+	this.addButton.click(function (e) {
+		if (currentContact == null) {
+			print_error("No contact selected");
+			return false;
+		}
+		//Make sure we're not accidentally passing objects or strings 
+		var price = parseFloat(context.currentPrice);
+		if (isNaN(price)) {
+			price = 0;
+		}
+
+		//Save this transaction into the local transaction list
+		var passdata = {
+				"price": price,
+				"type": "event",
+				"contactid": currentContact.id };
+		passdata.fields = {};
+		passdata.fields.participant_contact_id = currentContact.id;
+		passdata.fields.contact_id = currentContact.id;
+		passdata.fields.event_id = context.event.id;
+		passdata.fields.participant_status_id = 2; //1 = Registered, 2 = Attended
+		passdata.fields.participant_source = "Doorsheet Participant v"+version;
+		passdata.fields.participant_register_date = formatDate("", "db-time");
+		passdata.fields.participant_role_id = 1; //1 = Attendee
+		passdata.fields.participant_fee_currency = "USD";
+
+		StagedTransactions.add(passdata);
+	});
+
+	col_mid.append(this.eventPriceContainer);
+	col_right.append(this.addButton);
+
+	this.currentPrice = 0;
+
+	this.defaultPrice = 0;
+	this.discountPrice = 0;
+	this.guestPrice = 0;
+
+	//Set to a generic input object so it doesn't fail
+	this.defaultPriceInput = $("<input>");
+	this.freePriceInput = {};
+	this.discountPriceInput = {};
+	this.guestPriceInput = {};
+
+	if (pricefieldvalues.length > 0) {
+		for (var i = 0; i < pricefieldvalues.length; i++) {
+			var price = pricefieldvalues[i];
+			print_debug (price);
+			var eventPriceInput = $('<input name="event-pricefield" type="radio" value="'+price.amount+'">');
+			var eventPriceLabel = $('<label> '+price.label+'</label>');
+			eventPriceLabel.prepend(eventPriceInput);
+			eventPriceLabel.append('&nbsp;');
+			eventPriceOptionsContainer.append(eventPriceLabel);
 			if (price.is_default == "1") {
-				thisButton.data("amount", price.amount);
-				thisButton.data("contributiontypeid", contributionTypeId);
-				thisButton.data("eventid", event_id);
-				thisButton.data("txlabel", eventTitle + ": " + price["label"]);
-				is_def = " checked";
-				newEventForm.find(".eventPriceContainer").empty()
-				.append("<span class='badge eventPrice' style='font-size:28px;'>" + parseFloat(price.amount).toFixed(2) + "</span>");
+				this.defaultPrice = parseFloat(price.amount);
+				this.defaultPriceInput = eventPriceInput;
+				this.setPrice(this.defaultPrice);
+				this.defaultPriceInput.prop('checked', true);
+			} else if (price.label == "Guest") {
+				this.guestPrice = parseFloat(price.amount);
+				this.guestPriceInput = eventPriceInput;
+			} else if (price.label == "Discount") {
+				this.discountPrice = parseFloat(price.amount);
+				this.discountPriceInput = eventPriceInput;
 			}
-			newEventForm.find(".event-priceFields")
-			.append("<label><input name='event-price-field' data-financialtypeid='" + financialTypeId + "' data-contributiontypeid='" + 
-					contributionTypeId + "' data-pricefieldid='" + price["id"] + "' data-txlabel='" + 
-					eventTitle + ": " + price["label"] + "' data-eventid='" + 
-					event_id + "' type='radio' value='" + price["amount"] + "'" + is_def + "> " + 
-					price["label"] + "</label> ");
-		});
-
-	} else {
-		newEventForm.find(".event-priceFields").append("<label><input name='event-price-field' " +
-				"data-contributiontypeid='4' data-txlabel='" + eventTitle + ": Free' data-eventid='" + 
-				event_id + "' type='radio' value='0.00' checked='checked'> Attending</label>");
-		thisButton.data("amount", 0);
-		thisButton.data("contributiontypeid", 4);
-		thisButton.data("eventid", event_id);
-		thisButton.data("txlabel", eventTitle + ": Attending");
-	}
-
-
-	newEventForm.find("input[name='event-price-field']").click(function (event) {
-		var event_id = $(this).data("eventid");
-		var price = parseFloat($(this).val());
-
-		if (price != 0) {
-			$("#event-transaction-" + event_id + " .eventPriceContainer").empty()
-			.append("<span class='badge eventPrice' style='font-size:28px;'>" + price.toFixed(2) + "</span>");
-		} else {
-			$("#event-transaction-" + event_id + " .eventPriceContainer").empty()
-			.append("<span class='badge eventPrice' style='font-size:28px;'>" + price.toFixed(2) + "</span>");
-
-			//TODO: Log & Save - automatically log and save free events
-			/*
-			var button = $("<button type='button' class='btn btn-default btn-warning' name='event-free' data-target='transaction-info'>Log &amp; Save</button>");
-			button.click(function (event) {
-				//This should immediately log an attendance transaction
-				print_error("This function is not implemented yet, for now, click add, then click submit");
+			if (price.amount == 0) {
+				this.freePriceInput = eventPriceInput;
+			} 
+			eventPriceInput.click(function (e) {
+				context.setPrice($(this).val());
 			});
-			$("#event-transaction-" + event_id + " .eventPriceContainer").empty().append(button);
-			 */
-		}
-		thisButton.data("amount", price);
-		thisButton.data("contributiontypeid", $(this).data("contributiontypeid"));
-		thisButton.data("eventid", $(this).data("eventid"));
-		thisButton.data("txlabel", $(this).data("txlabel"));
-	});
-
-	thisButton.click(function (event) {
-		if (!currentContact.id) {
-			print_error("No contact loaded");
-		} else {
-			prepare_event_tx($(this).data("eventid"), $(this).data("contributiontypeid"), $(this).data("amount"), $(this).data("txlabel"));
-		}
-	});
-
-	//TODO: Make this container permanent across reloads
-	$("#transaction-container").prepend(newEventForm);
+		};
+	} else {
+		eventPriceOptionsContainer.append('No price set defined, click Add to register a participant');
+	}
+	if ($.isEmptyObject(this.discountPriceInput)) {
+		this.discountPriceInput = this.defaultPriceInput;
+		this.discountPrice = this.defaultPrice;
+	}
+	if ($.isEmptyObject(this.freePriceInput)) {
+		this.freePriceInput = this.defaultPriceInput;
+	}
+	if ($.isEmptyObject(this.guestPriceInput)) {
+		this.guestPriceInput = this.defaultPriceInput;
+		this.guestPrice = this.defaultPrice;
+	}
 }
 
 $("#show-transactions").click(function (event) {
@@ -2785,6 +2933,23 @@ $("#show-main").click(function (event) {
 	$("#transactionlist-container").hide();
 });
 
+$("#refresh-data").click(refreshCaches);
+
+function refreshCaches() {
+	var timeout = 0;
+	progressBar.reset();
+	progressBar.show();
+	$.each(Caches, function (idx, cache) {
+		cache.empty();
+		setTimeout (function () {
+			cache.fetch();
+		}, timeout);
+		timeout = timeout + ajaxdelay; //Wait n milliseconds before scheduling the next one
+	});
+	progressBar.hide();
+}
+
+
 $("#show-reports").click(function (event) {
 	$("#main").hide();
 	$("#reports-container").show();
@@ -2798,17 +2963,7 @@ $("#show-reports").click(function (event) {
 
 	//We just toggled it
 	if ($("#reports-container").is(":visible") ) {
-		var timeout = 0;
-		progressBar.reset();
-		progressBar.show();
-		$.each(Caches, function (idx, cache) {
-			cache.empty();
-			setTimeout (function () {
-				cache.fetch();
-			}, timeout);
-			timeout = timeout + ajaxdelay; //Wait n seconds before scheduling the next one
-		});
-		progressBar.hide();
+		refreshCaches();
 		getReports();
 	}
 });
@@ -2867,28 +3022,38 @@ $("#discount-add").click(function (event) {
 	//TODO: Make the credit types dynamic
 	var data = {};
 	data.type = "discount";
-	data.contactId = currentContact.id;
+	data.contactid = currentContact.id;
 	data.price = 0;
 	data.fields = {};
 	//Don't use parseInt because of rounding issues when adding int's and float's
 	data.fields.credit = parseFloat($("#discount-panel").find("input[name='credit']").val());
 	data.fields.rbucks = parseFloat($("#discount-panel").find("input[name='rbucks']").val());
 	data.fields.guestpasses = parseFloat($("#discount-panel").find("input[name='guestpasses']").val());
-	var humanText = "";
-	if (data.fields.credit > 0) {
+	if (!isNaN(data.fields.credit) && data.fields.credit > 0) {
 		data.price = data.price - data.fields.credit;
-		humanText = "Money";
+	} else {
+		delete data.fields.credit;
 	}
 
-	if (data.fields.rbucks > 0) {
+	if (!isNaN(data.fields.rbucks) && data.fields.rbucks > 0) {
 		data.price = data.price - data.fields.rbucks;
-		humanText = "RbucKS";
-	}
-	if (data.fields.guestpasses > 0) {
-		humanText = "Guest Pass";
+	} else {
+		delete data.fields.rbucks;
 	}
 
-	add_tx("Credit - " + humanText + ": ", data);
+	if (!isNaN(data.fields.guestpasses) && data.fields.guestpasses > 0) {
+		var lrgGuestPrice = 0;
+		$.each (EventPanels, function (index, eventpanel) {
+			if (eventpanel.guestPrice > lrgGuestPrice) {
+				lrgGuestPrice = eventpanel.guestPrice;
+			}
+		});
+		data.price = data.price - (data.fields.guestpasses * lrgGuestPrice);
+	} else {
+		delete data.fields.guestpasses;
+	}
+
+	StagedTransactions.add(data);
 });
 
 //Reserve discount
@@ -2896,7 +3061,7 @@ $("#reserve-add").click(function (event) {
 	print_error("Reserving for other transaction not implemented yet - add the discount to this transaction");
 });
 
-$("#cancel-transaction").click(cancelStagedTransactions);
+$("#cancel-transaction").click(StagedTransactions.clear);
 
 $("#submit-transaction").click(function (event) {
 	submitTransaction($(this).data());

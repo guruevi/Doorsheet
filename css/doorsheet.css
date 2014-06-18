@@ -74,6 +74,7 @@ body {
 	border-color: #bce8f1;
 	color: #31708f;
 	padding-right:35px;
+	min-height: 42px;
 }
 .txinfo .close {
 	position: relative;
@@ -127,13 +128,25 @@ to {background-color:#faebcc;}
 @keyframes attention-danger
 {
 from {background-color:inherit;}
-to {background-color:#a94442;}
+to {background-color:#CC0000;}
 }
 /*Safari and Chrome:*/
 @-webkit-keyframes attention-danger
 {
 from {background-color:inherit;}
 to {background-color:#a94442;}
+}
+
+@keyframes attention-quick
+{
+from {background-color:inherit;}
+to {background-color:#FFFFFF;}
+}
+/*Safari and Chrome:*/
+@-webkit-keyframes attention-quick
+{
+from {background-color:inherit;}
+to {background-color:#FFFFFF;}
 }
 
 .attention-info {
@@ -152,6 +165,11 @@ to {background-color:#a94442;}
 	animation:attention-danger 1s infinite alternate;
 	/*Safari and Chrome:*/
 	-webkit-animation:attention-danger 1s infinite alternate;
+}
+
+.attention-quick {
+	animation: attention-quick 0.1s 2 alternate;
+	-webkit-animation: attention-quick 0.1s 2 alternate;
 }
 
 .membership-gold {
