@@ -1,11 +1,11 @@
 /**
  * Doorsheet.js
  * @author vanooste
- * @version 0.8a
+ * @version 0.8b
  * @license GPLv3
  */
 var debug = false;
-var version = "0.8a";
+var version = "0.8b";
 
 /** Dev Notes: 
  * To check whether something is empty use $.isEmptyObject which works similar to how PHP's empty() works http://jsfiddle.net/ivan_sim/N8TVV/13/ except it doesn't work on arrays
@@ -81,7 +81,7 @@ $(document).ajaxStart(function(){
  *  What is the Base URL for our source data - you can use a full URL here
  * TODO: Make this dynamically update-able in a config screen
  */
-var BaseURL = "/";
+var BaseURL = "https://your-drupal-site/";
 /**
  * Where do we go to get our data
  * Add debug=1& to the URL for debugging purposes
@@ -621,120 +621,212 @@ function getContribution (contribution_id) {
 	return Caches.contributions.data[contribution_id];
 }
 
+function getLoadedEvents() {
+	var loaded_events = $("#load-events-form input[name='event-id[]']:checked");
+	var ret = [];
+	if (loaded_events.length == 0) {
+		print_error("You did not load any events, load an event");
+		return ret;
+	}
+	$.each(loaded_events, function (idx, event_input) {
+		//Get the Event itself from Cache
+		ret.push(Caches.events.data[$(event_input).val()]);
+	});
+	return ret;
+}
+
 /**
  * This function generates the end report
  */
 function getReports() {
-	if (Caches.events.data.length == 0 || Caches.participants.data.length == 0 || Caches.memberships.data.length == 0 || Caches.contributions.data.length == 0 || Caches.participantpayments.data.length == 0) {
+	if (Caches.events.data.length == 0 || Caches.participants.data.length == 0 || Caches.contacts.data.length == 0 || Caches.contributions.data.length == 0 || Caches.memberships.data.length == 0) {
 		setTimeout(getReports, 250);
 		return;
 	}
-
-	var loaded_events = $("#load-events-form input[name='event-id[]']:checked");
+	
+	var loaded_events = getLoadedEvents();
 	if (loaded_events.length == 0) {
-		print_error("You did not load any events, load an event");
-		setTimeout(getReports, 250);
 		return;
 	}
-
-	var uniq_contacts = [];
+	
+	//Stores the unique contacts for all the events
+	var uniq_guests = [];
+	var uniq_members = [];
+	//An array of dates
 	var datesArr = [];
+	
 	//Call this as a filter
 	function onlyUnique(value, index, self) { 
 		return self.indexOf(value) === index;
 	}
 
-	var tbody = $("#event_report tbody");
-	tbody.empty();
-	var eventtotaltr = $("<tr>");
-	var eventtotalcashtd = $("<td>");
-	var eventtotalcredittd = $("<td>");
-	var eventtotalchecktd = $("<td>");
-	var eventtotalrbuckstd = $("<td>");
-	var eventtotalparticipanttd = $("<td>");
-	//Make a neat table for each event
-	eventtotaltr.append("<td>Event totals</td>")
-	.append(eventtotalcashtd)
-	.append(eventtotalcredittd)
-	.append(eventtotalchecktd)
-	.append(eventtotalrbuckstd)
-	.append(eventtotalparticipanttd);
-	var eventtotalcheckContrib = 0;
-	var eventtotalcashContrib = 0;
-	var eventtotalcreditContrib = 0;
-	var eventtotalrbucksContrib = 0;
-
-	$.each(loaded_events, function (idx, event_input) {
-		//For each loaded event
-		var event = Caches.events.data[$(event_input).val()];
+	//Fetch the tbody of the event tables and empty it
+	var tbody_total = $("#event_total_report tbody").empty();
+	var tbody_guests = $("#event_guests_report tbody").empty();
+	var tbody_members = $("#event_member_report tbody").empty();
+	
+	//Stores the total contributions for each payment type
+	var event_totals = {};
+	event_totals.total = {};
+	event_totals.total.check = 0;
+	event_totals.total.cash = 0;
+	event_totals.total.credit = 0;
+	event_totals.total.rbucks = 0;
+	
+	event_totals.guests = {};
+	event_totals.guests.check = 0;
+	event_totals.guests.cash = 0;
+	event_totals.guests.credit = 0;
+	event_totals.guests.rbucks = 0;
+	
+	event_totals.members = {};
+	event_totals.members.check = 0;
+	event_totals.members.cash = 0;
+	event_totals.members.credit = 0;
+	event_totals.members.rbucks = 0;
+	
+	
+	//For each loaded event
+	$.each(loaded_events, function (idx, event) {
+		//Find the starting and ending dates, push them onto the datesArr array
 		datesArr.push(moment(event.start_date));
 		datesArr.push(moment(event.end_date));
-		var tr = $("<tr data-eventid="+event.id+">");
-		var cashtd = $("<td>");
-		var credittd = $("<td>");
-		var checktd = $("<td>");
-		var rbuckstd = $("<td>");
-		var participanttd = $("<td>");
-		//Make a neat table for each event
-		tr.append("<td>"+event.title+"</td>")
-		.append(cashtd)
-		.append(credittd)
-		.append(checktd)
-		.append(rbuckstd)
-		.append(participanttd);
-		tbody.append(tr);
+		
 		//Initialize all the data to zero
-		var checkContrib = 0;
-		var cashContrib = 0;
-		var creditContrib = 0;
-		var rbucksContrib = 0;
-		var eventguests = 0;
-		//Get participants filtered by event_id
+		var guest_income = {};
+		var member_income = {};
+		var guests = 0;
+		var members = 0;
+		guest_income.check = 0;
+		guest_income.cash = 0;
+		guest_income.credit = 0;
+		guest_income.rbucks = 0;
+		member_income.check = 0;
+		member_income.cash = 0;
+		member_income.credit = 0;
+		member_income.rbucks = 0;
+		
+		//Get all the participants for this event_id
 		var participants = getParticipants_Event(event.id);
-		//Set the number of participants
-
+		
+		//For each of the participants for this event
 		$.each (participants, function (idx, participant) {
+			//Make sure we're only fetching participants that attended, not just registered
 			if (participant.participant_status_id != 2) {
 				return true; //Return false breaks the entire loop, return non-false is a 'continue'
 			}
+			
+			//Keep track of the contact for number of unique contacts purposes
+			
+			
+			var event_total;
+			var income;
+			//If we have no membership for this participant, they are guests
 			if (Caches.memberships.getContactId(participant.contact_id).length == 0) {
-				eventguests++; //Participant does not have an associated membership, therefore they are guests
+				guests++;
+				income = guest_income;
+				event_total = event_totals.guests;
+				uniq_guests.push(participant.contact_id);
+			} else {
+				members++;
+				income = member_income;
+				event_total = event_totals.members;
+				uniq_members.push(participant.contact_id);
 			}
-			uniq_contacts.push(participant.contact_id);
+
+			//Get the payments associated with this participant
 			var participant_payments = getParticipantPayment_Participant(participant.id);
+			
+			//Loop over each participant payment
 			$.each(participant_payments, function (idx, participant_payment) {
+				//Get the contribution associated with the participant payment
 				var contribution = getContribution (participant_payment.contribution_id);
+				var price = parseFloat(contribution.total_amount);
+				//Put the contribution in the right slot
 				if (contribution.instrument_id == "83") {
-					cashContrib += parseFloat(contribution.total_amount);	
+					income.cash += price;
+					event_total.cash += price;
+					event_totals.total.cash += price;
 				} else if (contribution.instrument_id == "84") {
-					checkContrib += parseFloat(contribution.total_amount);
+					income.check += price;
+					event_total.check += price;
+					event_totals.total.check += price;
 				} else if (contribution.instrument_id == "81") {
-					creditContrib += parseFloat(contribution.total_amount);
+					income.credit += price;
+					event_total.credit += price;
+					event_totals.total.credit += price;
 				} else if (contribution.instrument_id == "720") {
-					rbucksContrib += parseInt(contribution.total_amount);
+					income.rbucks += parseInt(contribution.total_amount);
+					event_total.rbucks += price;
+					event_totals.total.rbucks += price;
 				}
-			});
-		});
-		eventtotalcashContrib += cashContrib;
-		cashtd.text(cashContrib);
-		eventtotalcheckContrib += checkContrib;
-		checktd.text(checkContrib);
-		eventtotalcreditContrib += creditContrib;
-		credittd.text(creditContrib);
-		eventtotalrbucksContrib += rbucksContrib;
-		rbuckstd.text(rbucksContrib);
-		participanttd.text(participants.length + " (" + eventguests + " guests)");
-	});
+			}); //End of Participant Payments loop
+		}); //End of Participants loop
+		
+		//Make TR's for this event
+		var tr_g = $("<tr>");
+		var tr_m = $("<tr>");
+		var tr_t = $("<tr>");
+		tbody_total.append(tr_t);
+		tbody_guests.append(tr_g);
+		tbody_members.append(tr_m);
 
-	eventtotalcashtd.text(eventtotalcashContrib);
-	eventtotalchecktd.text(eventtotalcheckContrib);
-	eventtotalcredittd.text(eventtotalcreditContrib);
-	eventtotalrbuckstd.text(eventtotalrbucksContrib);
+		tr_t.append('<td>' + event.title + '</td>');
+		tr_g.append('<td>' + event.title + '</td>');
+		tr_m.append('<td>' + event.title + '</td>');
+		/*
+		 * 	<th style="width: 300px;">Event Name</th>
+								<th style="width: 100px;">Cash</th>
+								<th style="width: 100px;">Credit</th>
+								<th style="width: 100px;">Check</th>
+								<th style="width: 100px;">RBucKS</th>
+								<th style="width: 200px;">Participants</th>
+		 */
+		tr_g.append('<td>' + guest_income.cash + "</td>");
+		tr_g.append('<td>' + guest_income.credit + "</td>");
+		tr_g.append('<td>' + guest_income.check + "</td>");
+		tr_g.append('<td>' + guest_income.rbucks + "</td>");
+		tr_g.append('<td>' + guests + "</td>");
+		tr_m.append('<td>' + member_income.cash + "</td>");
+		tr_m.append('<td>' + member_income.credit + "</td>");
+		tr_m.append('<td>' + member_income.check + "</td>");
+		tr_m.append('<td>' + member_income.rbucks + "</td>");
+		tr_m.append('<td>' + members + "</td>");
+		tr_t.append('<td>' + (guest_income.cash + member_income.cash) + "</td>");
+		tr_t.append('<td>' + (guest_income.credit + member_income.credit) + "</td>");
+		tr_t.append('<td>' + (guest_income.check + member_income.check) + "</td>");
+		tr_t.append('<td>' + (guest_income.rbucks + member_income.rbucks) + "</td>");
+		tr_t.append('<td>' + (guests + members) + "</td>");
+	}); //End of Events loop
 
-	uniq_contacts = uniq_contacts.filter( onlyUnique );
+	var tr_g = $("<tr>");
+	var tr_m = $("<tr>");
+	var tr_t = $("<tr>");
+	tbody_total.append(tr_t);
+	tbody_guests.append(tr_g);
+	tbody_members.append(tr_m);
+	
+	tr_g.append("<td>");
+	tr_m.append("<td>");
+	tr_t.append("<td>");
+	
+	tr_g.append("<td>" + event_totals.guests.cash + "</td>");
+	tr_g.append("<td>" + event_totals.guests.credit + "</td>");
+	tr_g.append("<td>" + event_totals.guests.check + "</td>");
+	tr_g.append("<td>" + event_totals.guests.rbucks + "</td>");
+	tr_g.append("<td>" + uniq_guests.filter(onlyUnique).length + " (unique)</td>");
+	
+	tr_m.append("<td>" + event_totals.members.cash + "</td>");
+	tr_m.append("<td>" + event_totals.members.credit + "</td>");
+	tr_m.append("<td>" + event_totals.members.check + "</td>");
+	tr_m.append("<td>" + event_totals.members.rbucks + "</td>");
+	tr_m.append("<td>" + uniq_members.filter(onlyUnique).length + " (unique)</td>");
 
-	eventtotalparticipanttd.text(uniq_contacts.length + " (unique)");
-	tbody.append(eventtotaltr);
+	tr_t.append("<td>" + event_totals.total.cash + "</td>");
+	tr_t.append("<td>" + event_totals.total.credit + "</td>");
+	tr_t.append("<td>" + event_totals.total.check + "</td>");
+	tr_t.append("<td>" + event_totals.total.rbucks + "</td>");
+	tr_t.append("<td>" + (uniq_members.filter(onlyUnique).length + uniq_guests.filter(onlyUnique).length) + " (unique)</td>");
 
 	var smallestDate = datesArr.reduce(function(previousValue, currentValue){
 		if (currentValue.isBefore(previousValue)) {
@@ -770,8 +862,8 @@ function getReports() {
 	var mbcreditContrib = 0;
 	var mbrbucksContrib = 0;
 	var new_members = 0;
+	
 	//Filter contributions for memberships made on above event days +/- 12 hours
-
 	var membershipContributions = Caches.contributions.data.filter(function (contribution) {
 		if (contribution.financial_type_id == "2" && 
 				moment(contribution.receive_date).isAfter(smallestDate) && 
@@ -818,104 +910,17 @@ function getReports() {
 	.append(totalchecktd)
 	.append(totalrbuckstd)
 	.append(totaltd);
+	
 	$("#total_report tbody").empty().append(totaltr);
-	var totalcheckContrib = eventtotalcheckContrib + mbcheckContrib;
-	var totalcashContrib = eventtotalcashContrib + mbcashContrib;
-	var totalcreditContrib = eventtotalcreditContrib + mbcreditContrib;
-	var totalrbucksContrib = eventtotalrbucksContrib + mbrbucksContrib;
+	var totalcheckContrib = event_totals.total.check + mbcheckContrib;
+	var totalcashContrib = event_totals.total.cash + mbcashContrib;
+	var totalcreditContrib = event_totals.total.credit + mbcreditContrib;
+	var totalrbucksContrib = event_totals.total.rbucks + mbrbucksContrib;
 	totalchecktd.text(totalcheckContrib);
 	totalcashtd.text(totalcashContrib);
 	totalcredittd.text(totalcreditContrib);
 	totalrbuckstd.text(totalrbucksContrib);
 	totaltd.text(totalcheckContrib + totalcashContrib + totalcreditContrib + totalrbucksContrib);
-
-	var totalmembercash = 0;
-	var totalnonmembercash = 0;
-	var totalmembercredit = 0;
-	var totalnonmembercredit = 0;
-	var totalmembercheck = 0;
-	var totalnonmembercheck = 0;
-	var totalmemberrbucks = 0;
-	var totalnonmemberrbucks = 0;
-
-	var totalmembertr = $("<tr>");
-	var totalmembercashtd = $("<td>0.00</td>");
-	var totalmembercredittd = $("<td>0.00</td>");
-	var totalmemberchecktd = $("<td>0.00</td>");
-	var totalmemberrbuckstd = $("<td>0</td>");
-	var totalmembertd = $("<td>0</td>");
-	totalmembertr.append("<td>Received:</td>")
-	.append(totalmembercashtd)
-	.append(totalmembercredittd)
-	.append(totalmemberchecktd)
-	.append(totalmemberrbuckstd)
-	.append(totalmembertd);
-	$("#total_member_report tbody").empty().append(totalmembertr);
-
-	var totalnonmembertr = $("<tr>");
-	var totalnonmembercashtd = $("<td>0.00</td>");
-	var totalnonmembercredittd = $("<td>0.00</td>");
-	var totalnonmemberchecktd = $("<td>0.00</td>");
-	var totalnonmemberrbuckstd = $("<td>0</td>");
-	var totalnonmembertd = $("<td>0</td>");
-	totalnonmembertr.append("<td>Received:</td>")
-	.append(totalnonmembercashtd)
-	.append(totalnonmembercredittd)
-	.append(totalnonmemberchecktd)
-	.append(totalnonmemberrbuckstd)
-	.append(totalnonmembertd);
-	$("#total_nonmember_report tbody").empty().append(totalnonmembertr);
-
-	$.each(loaded_events, function (idx, event_input) {
-		//For each loaded event
-		var event = Caches.events.data[$(event_input).val()];
-
-		//Get participants filtered by event_id
-		var participants = getParticipants_Event(event.id);
-
-		$.each (participants, function (idx, participant) {
-			var participant_payments = getParticipantPayment_Participant(participant.id);
-			var cashContrib = 0;
-			var checkContrib = 0;
-			var creditContrib = 0;
-			var rbucksContrib = 0;
-			$.each(participant_payments, function (idx, participant_payment) {
-				var contribution = getContribution (participant_payment.contribution_id);
-				if (contribution.instrument_id == "83") {
-					cashContrib += parseFloat(contribution.total_amount);	
-				} else if (contribution.instrument_id == "84") {
-					checkContrib += parseFloat(contribution.total_amount);
-				} else if (contribution.instrument_id == "81") {
-					creditContrib += parseFloat(contribution.total_amount);
-				} else if (contribution.instrument_id == "720") {
-					rbucksContrib += parseInt(contribution.total_amount);
-				}
-			});
-			if (Caches.memberships.getContactId(participant.contact_id).length == 0) {
-				//Non member
-				totalnonmembercash += cashContrib;
-				totalnonmembercredit += creditContrib;
-				totalnonmembercheck += checkContrib;
-				totalnonmemberrbucks += rbucksContrib;
-			} else {
-				//Member
-				totalmembercash += cashContrib;
-				totalmembercredit += creditContrib;
-				totalmembercheck += checkContrib;
-				totalmemberrbucks += rbucksContrib;
-			}
-		});
-	});
-	totalnonmembercashtd.text(totalnonmembercash);
-	totalnonmembercredittd.text(totalnonmembercredit);
-	totalnonmemberchecktd.text(totalnonmembercheck);
-	totalnonmemberrbuckstd.text(totalnonmemberrbucks);
-	totalmembercashtd.text(totalmembercash);
-	totalmembercredittd.text(totalmembercredit);
-	totalmemberchecktd.text(totalmembercheck);
-	totalmemberrbuckstd.text(totalmemberrbucks);
-	totalmembertd.text(totalmembercash + totalmembercredit + totalmembercheck + totalmemberrbucks);
-	totalnonmembertd.text(totalnonmembercash + totalnonmembercredit + totalnonmembercheck + totalnonmemberrbucks);
 }
 
 /**
@@ -1667,8 +1672,7 @@ function test_apidata_error(data, successMsg, errorMsg) {
 function logTransaction(query, textStatus) {
 	print_debug (query);
 	var cache = null;
-	var baseurl = "https://crmv1.rochesterkinksociety.com/index.php";
-	var url = "";
+	var url = BaseURL + "index.php";
 	switch (query.entity) {
 	case "Contact":
 		cache = Caches.contacts;
@@ -1685,7 +1689,7 @@ function logTransaction(query, textStatus) {
 		if ("custom_5" in query) {
 			delete query.custom_5;
 		}
-		url = "?q=civicrm/contact/view&reset=1&cid="+query.id;
+		url += "?q=civicrm/contact/view&reset=1&cid="+query.id;
 		break;
 	case "Membership":
 		cache = Caches.memberships;
@@ -1693,7 +1697,7 @@ function logTransaction(query, textStatus) {
 		query.end_date = query.membership_end_date;
 		query.contact_id = query.membership_contact_id;
 		//?q=civicrm/contact/view/membership&action=view&reset=1&cid=284&id=224&context=membership&selectedChild=member
-		url = "?q=civicrm/contact/view/membership&action=view&reset=1&id="+query.id+"&cid="+query.contact_id+"&context=membership&selectedChild=member";
+		url += "?q=civicrm/contact/view/membership&action=view&reset=1&id="+query.id+"&cid="+query.contact_id+"&context=membership&selectedChild=member";
 		break;	
 	case "ParticipantPayment":
 		cache = Caches.participantpayments;
@@ -1725,13 +1729,13 @@ function logTransaction(query, textStatus) {
 			query.instrument_id == "720";
 		}
 		query.total_amount = parseFloat(query.total_amount).toFixed(2);
-		url = "?q=civicrm/contact/view/contribution&reset=1&action=view&id="+query.id+"&cid="+query.contact_id+"&context=contribution&selectedChild=contribute";
+		url += "?q=civicrm/contact/view/contribution&reset=1&action=view&id="+query.id+"&cid="+query.contact_id+"&context=contribution&selectedChild=contribute";
 		break;
 	case "Participant":
 		cache = Caches.participants;
 		query.contact_id = query.participant_contact_id;
 		query.event_title = Caches.events.data[query.event_id].event_title;
-		url = "?q=civicrm/contact/view/participant&reset=1&action=view&id="+query.id+"&cid="+query.contact_id+"&context=search&selectedChild=event&compContext=participant";
+		url += "?q=civicrm/contact/view/participant&reset=1&action=view&id="+query.id+"&cid="+query.contact_id+"&context=search&selectedChild=event&compContext=participant";
 		break;
 	default:
 	case "MembershipType":
@@ -1765,9 +1769,7 @@ function logTransaction(query, textStatus) {
 	var tr = $("<tr>");
 	tr.append("<td>"+formatDate("", "database-time")+"</td><td>"+query.entity+"</td><td>"+query.action+"</td><td>"+query.id+"</td><td>"+textStatus+"</td>");
 	var edittd = $("<td></td>");
-	if (url != "") {
-		edittd.append("<a href='"+baseurl + url+"'>Edit in backend</a>");
-	}
+	edittd.append("<a href='"+url+"'>Edit in backend</a>");
 	tr.append(edittd);
 	$("#transactions-table tbody").prepend(tr);
 	//Limit this
@@ -2453,7 +2455,7 @@ function putMembershipsInPanel() {
 	//Remove previous info
 	$("#membership-info").empty();
 	$("#discountsAvailable").empty();
-	$("#membership-info").append('<a href="https://crmv1.rochesterkinksociety.com/index.php?q=civicrm/contact/view&reset=1&cid='+contact_id+'" target="_blank">Contact ID: ' + contact_id + '</a><br>');
+	$("#membership-info").append('<a href="'+BaseURL+'index.php?q=civicrm/contact/view&reset=1&cid='+contact_id+'" target="_blank">Contact ID: ' + contact_id + '</a><br>');
 	$("#membership-info").removeClass().addClass("panel-body"); //Delete all the alert styles, restore panel-body
 	$("body").removeClass();
 
@@ -3001,8 +3003,10 @@ $("#mail-report").click(function (event) {
 	html.find("th").removeAttr('style').css("text-align", "left");
 	query.subject = "Event Report";
 	query.body = html.html();
+	query.secret = "your-secret"; 
+	query.mail_to = "treasurer@your-domain.com";
 	$.ajax({
-		url: BaseURL + "/Doorsheet/mailer.php",
+		url: BaseURL + "Doorsheet/mailer.php",
 		dataType: "json", //Don't forget to say this, it will fail otherwise
 		data: query,
 	})

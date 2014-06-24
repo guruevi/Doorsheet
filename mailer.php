@@ -1,6 +1,12 @@
 <?php
+$secret = $_REQUEST['secret'];
+$truesecret = "your-secret";
+if ($secret !== $truesecret) {
+	echo json_encode (false);
+	exit;
+}
 
-$to = "rks@rochesterkinksociety.com";
+$to = $_REQUEST['mail_to'];
 $subject = $_REQUEST['subject'];
 $message = '<html><body>' . $_REQUEST['body'] . '</body></html>';
 
@@ -11,6 +17,6 @@ $headers .= 'From: doorsheet@rochesterkinksociety.com' . "\r\n" .
             'X-Mailer: PHP/' . phpversion();
 
 
-mail ( $to , $subject , $message, $headers);
-echo json_encode (true);
+$return = mail ( $to , $subject , $message, $headers);
+echo json_encode ($return);
 ?>
