@@ -7,7 +7,7 @@
 <meta name="description" content="">
 <meta name="author" content="">
 <link rel="shortcut icon" href="favicon.ico">
-<title>Doorsheet v0.8b</title>
+<title>Doorsheet v0.9</title>
 
 <!-- Bootstrap core CSS -->
 <link href="css/bootswatch/default/bootstrap.min.css" rel="stylesheet"
@@ -43,7 +43,7 @@
 						class="icon-bar"></span> <span class="icon-bar"></span> <span
 						class="icon-bar"></span>
 				</button>
-				<a class="navbar-brand" href="#">Doorsheet v0.8b</a>
+				<a class="navbar-brand" href="#">Doorsheet v0.9</a>
 			</div>
 			<div class="navbar-collapse collapse">
 				<ul class="nav navbar-nav navbar-right">
@@ -501,8 +501,11 @@
 		<!-- /.modal-dialog -->
 	</div>
 	<!-- /.modal -->
+
 	<!-- Special options modal -->
-	<div class="modal fade" id="custom-membership-modal">
+	<div class="modal fade" id="custom-membership-modal" tabindex="-1"
+		role="dialog" aria-labelledby="custom-membership-modal"
+		aria-hidden="true">
 		<div class="modal-dialog">
 			<div class="modal-content">
 				<form id="custom-membership-form">
@@ -544,6 +547,37 @@
 	</div>
 	<!-- /.modal -->
 
+	<!-- Cancel Contribution Modal -->
+	<div class="modal fade" id="cancelcontribution-modal" tabindex="-1"
+		role="dialog" aria-labelledby="cancelcontribution-modal"
+		aria-hidden="true">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="modal-header">
+					<button type="button" class="close" data-dismiss="modal">
+						<span aria-hidden="true">&times;</span><span class="sr-only">Close</span>
+					</button>
+					<h4 class="modal-title" id="myModalLabel">Are you sure you
+						want to cancel this contribution?</h4>
+				</div>
+				<div class="modal-body">
+					<p class="bg-danger"><span class="label label-danger">WARNING:</span><br>You are about to cancel a contribution. Please provide a
+						reason</p>
+					<p>
+						Reason: <input type="text" name="cancelcontribution-reason"></input>
+					</p>
+					<p >Note: You should not use this to refund transactions, if you need to refund a contribution, a board member should set this contribution to "Refunded" in the backend</p>
+					<input type="hidden" name="cancelcontribution-id" value="0"></input>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+					<button type="button" class="btn btn-primary" id="cancelcontribution-confirm">Cancel
+						Contribution</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
 	<!-- These are the debug div, leave them here so they show up on the bottom of all tabs -->
 	<div class="container-fluid">
 		<div class="row alert alert-warning" id="debug"
@@ -562,6 +596,8 @@
 	<script src="js/bootstrap-datepicker/js/bootstrap-datepicker.js"></script>
 	<!-- Autocomplete select boxes -->
 	<script src="js/select2/select2.min.js"></script>
+	<!-- localForage by Mozilla -->
+	<!--<script src="https://github.com/mozilla/localForage/releases/download/1.2.2/localforage.js"></script>-->
 	<!-- Moment for date parsing -->
 	<script src="js/moment/min/moment.min.js"></script>
 	<!-- Load CryptoJS MD5 -->

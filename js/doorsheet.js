@@ -1,11 +1,11 @@
 /**
  * Doorsheet.js
  * @author vanooste
- * @version 0.8b
+ * @version 0.9
  * @license GPLv3
  */
 var debug = false;
-var version = "0.8b";
+var version = "0.9b";
 
 /** Dev Notes: 
  * To check whether something is empty use $.isEmptyObject which works similar to how PHP's empty() works http://jsfiddle.net/ivan_sim/N8TVV/13/ except it doesn't work on arrays
@@ -36,14 +36,15 @@ if (typeof (Storage) == "undefined") {
 /**
  * Define setObject method on the Storage prototype
  */
+var lstor = {};
 Storage.prototype.setObject = function (key, value) {
-	this.setItem(key, JSON.stringify(value));
+	lstor[key] = JSON.stringify(value);
 };
 /**
  * Define getObject method on Storage prototype
  */
 Storage.prototype.getObject = function (key) {
-	var value = this.getItem(key);
+	var value = lstor[key];
 	return value && JSON.parse(value);
 };
 
@@ -81,14 +82,14 @@ $(document).ajaxStart(function(){
  *  What is the Base URL for our source data - you can use a full URL here
  * TODO: Make this dynamically update-able in a config screen
  */
-var BaseURL = "https://your-drupal-site/";
+var BaseURL = "https://members.rochesterkinksociety.com/";
 /**
  * Where do we go to get our data
  * Add debug=1& to the URL for debugging purposes
  * Sequential=1 returns an array instead of an object of the results which makes things easier to parse using JavaScript array methods
  * TODO: Make this dynamically update-able in a config screen
  */
-var CRMRESTURL = BaseURL + "sites/all/modules/civicrm/extern/rest.php?json=1&sequential=1&key=your-site-key&options[limit]=1000";
+var CRMRESTURL = BaseURL + "sites/all/modules/civicrm/extern/rest.php?json=1&sequential=1&key=b6337bff4da75503142f9afc0c86a457"; //&options[limit]=2000&options[sort]=id";
 /**
  * Save the original URL so we can reset it in case we logout
  */
@@ -162,6 +163,7 @@ var Caches = {};
 Caches.contacts = new Cache ("Contact");
 Caches.memberships = new Cache ("Membership");
 Caches.participantpayments = new Cache ("ParticipantPayment");
+Caches.membershippayments = new Cache ("MembershipPayment");
 Caches.membershiptypes = new Cache ("MembershipType");
 Caches.contributions = new Cache ("Contribution");
 Caches.participants = new Cache ("Participant");
@@ -304,6 +306,14 @@ function Cache(entity) {
 		query.action = "get";
 		if (context.entity == "Contact") {
 			query['return'] = "nick_name,sort_name,first_name,last_name,email,custom_1,custom_2,custom_3,custom_4,custom_5";
+		}
+		if (context.entity == "Contribution") {
+			query['return'] = "financial_type_id,payment_instrument_id,receive_date,non_deductible_amount,total_amount,fee_amount,net_amount,trxn_id,currency,cancel_date,receipt_date,thankyou_date,contact_id,id,source,amount_level,is_pay_later,contribution_status_id";
+		}
+		if (context.entity == "Participant") {
+			query["options"] = {"limit":2000,"sort":"id desc"};
+		}else{			
+			query["options"] = {"limit":0};
 		}
 		$.ajax({
 			url: CRMRESTURL,
@@ -643,18 +653,18 @@ function getReports() {
 		setTimeout(getReports, 250);
 		return;
 	}
-	
+
 	var loaded_events = getLoadedEvents();
 	if (loaded_events.length == 0) {
 		return;
 	}
-	
+
 	//Stores the unique contacts for all the events
 	var uniq_guests = [];
 	var uniq_members = [];
 	//An array of dates
 	var datesArr = [];
-	
+
 	//Call this as a filter
 	function onlyUnique(value, index, self) { 
 		return self.indexOf(value) === index;
@@ -664,7 +674,7 @@ function getReports() {
 	var tbody_total = $("#event_total_report tbody").empty();
 	var tbody_guests = $("#event_guests_report tbody").empty();
 	var tbody_members = $("#event_member_report tbody").empty();
-	
+
 	//Stores the total contributions for each payment type
 	var event_totals = {};
 	event_totals.total = {};
@@ -672,26 +682,26 @@ function getReports() {
 	event_totals.total.cash = 0;
 	event_totals.total.credit = 0;
 	event_totals.total.rbucks = 0;
-	
+
 	event_totals.guests = {};
 	event_totals.guests.check = 0;
 	event_totals.guests.cash = 0;
 	event_totals.guests.credit = 0;
 	event_totals.guests.rbucks = 0;
-	
+
 	event_totals.members = {};
 	event_totals.members.check = 0;
 	event_totals.members.cash = 0;
 	event_totals.members.credit = 0;
 	event_totals.members.rbucks = 0;
-	
-	
+
+
 	//For each loaded event
 	$.each(loaded_events, function (idx, event) {
 		//Find the starting and ending dates, push them onto the datesArr array
 		datesArr.push(moment(event.start_date));
 		datesArr.push(moment(event.end_date));
-		
+
 		//Initialize all the data to zero
 		var guest_income = {};
 		var member_income = {};
@@ -705,20 +715,20 @@ function getReports() {
 		member_income.cash = 0;
 		member_income.credit = 0;
 		member_income.rbucks = 0;
-		
+
 		//Get all the participants for this event_id
 		var participants = getParticipants_Event(event.id);
-		
+
 		//For each of the participants for this event
 		$.each (participants, function (idx, participant) {
 			//Make sure we're only fetching participants that attended, not just registered
 			if (participant.participant_status_id != 2) {
 				return true; //Return false breaks the entire loop, return non-false is a 'continue'
 			}
-			
+
 			//Keep track of the contact for number of unique contacts purposes
-			
-			
+
+
 			var event_total;
 			var income;
 			//If we have no membership for this participant, they are guests
@@ -736,33 +746,38 @@ function getReports() {
 
 			//Get the payments associated with this participant
 			var participant_payments = getParticipantPayment_Participant(participant.id);
-			
+
 			//Loop over each participant payment
 			$.each(participant_payments, function (idx, participant_payment) {
 				//Get the contribution associated with the participant payment
 				var contribution = getContribution (participant_payment.contribution_id);
 				var price = parseFloat(contribution.total_amount);
+				if (contribution.contribution_status_id != "1") {
+					//Don't process pending payments
+					return;
+				}
 				//Put the contribution in the right slot
-				if (contribution.instrument_id == "83") {
+
+				if (contribution.instrument_id == "3") {
 					income.cash += price;
 					event_total.cash += price;
 					event_totals.total.cash += price;
-				} else if (contribution.instrument_id == "84") {
+				} else if (contribution.instrument_id == "4") {
 					income.check += price;
 					event_total.check += price;
 					event_totals.total.check += price;
-				} else if (contribution.instrument_id == "81") {
+				} else if (contribution.instrument_id == "1") {
 					income.credit += price;
 					event_total.credit += price;
 					event_totals.total.credit += price;
-				} else if (contribution.instrument_id == "720") {
+				} else if (contribution.instrument_id == "6") {
 					income.rbucks += parseInt(contribution.total_amount);
 					event_total.rbucks += price;
 					event_totals.total.rbucks += price;
 				}
 			}); //End of Participant Payments loop
 		}); //End of Participants loop
-		
+
 		//Make TR's for this event
 		var tr_g = $("<tr>");
 		var tr_m = $("<tr>");
@@ -805,17 +820,17 @@ function getReports() {
 	tbody_total.append(tr_t);
 	tbody_guests.append(tr_g);
 	tbody_members.append(tr_m);
-	
+
 	tr_g.append("<td>");
 	tr_m.append("<td>");
 	tr_t.append("<td>");
-	
+
 	tr_g.append("<td>" + event_totals.guests.cash + "</td>");
 	tr_g.append("<td>" + event_totals.guests.credit + "</td>");
 	tr_g.append("<td>" + event_totals.guests.check + "</td>");
 	tr_g.append("<td>" + event_totals.guests.rbucks + "</td>");
 	tr_g.append("<td>" + uniq_guests.filter(onlyUnique).length + " (unique)</td>");
-	
+
 	tr_m.append("<td>" + event_totals.members.cash + "</td>");
 	tr_m.append("<td>" + event_totals.members.credit + "</td>");
 	tr_m.append("<td>" + event_totals.members.check + "</td>");
@@ -862,13 +877,13 @@ function getReports() {
 	var mbcreditContrib = 0;
 	var mbrbucksContrib = 0;
 	var new_members = 0;
-	
+
 	//Filter contributions for memberships made on above event days +/- 12 hours
 	var membershipContributions = Caches.contributions.data.filter(function (contribution) {
-		if (contribution.financial_type_id == "2" && 
+		if (contribution.financial_type_id == "2" && contribution.contribution_status_id == "1" && 
 				moment(contribution.receive_date).isAfter(smallestDate) && 
 				moment(contribution.receive_date).isBefore(largestDate)) {
-			memberships = Caches.memberships.getContactId(contribution.contact_id);
+			var memberships = Caches.memberships.getContactId(contribution.contact_id);
 			$.each(memberships, function (idx, membership) {
 				if (membership.membership_type_id == trialMembershipId) {
 					//We paid in 12-something hours away from the current event
@@ -881,13 +896,13 @@ function getReports() {
 	});
 
 	$.each(membershipContributions, function (idx, contribution) {
-		if (contribution.instrument_id == "83") {
+		if (contribution.instrument_id == "3") {
 			mbcashContrib += parseFloat(contribution.total_amount);
-		} else if (contribution.instrument_id == "84") {
+		} else if (contribution.instrument_id == "4") {
 			mbcheckContrib += parseFloat(contribution.total_amount);
-		} else if (contribution.instrument_id == "81") {
+		} else if (contribution.instrument_id == "1") {
 			mbcreditContrib += parseFloat(contribution.total_amount);
-		} else if (contribution.instrument_id == "720") {
+		} else if (contribution.instrument_id == "6") {
 			mbrbucksContrib += parseInt(contribution.total_amount);
 		}
 	});
@@ -910,7 +925,7 @@ function getReports() {
 	.append(totalchecktd)
 	.append(totalrbuckstd)
 	.append(totaltd);
-	
+
 	$("#total_report tbody").empty().append(totaltr);
 	var totalcheckContrib = event_totals.total.check + mbcheckContrib;
 	var totalcashContrib = event_totals.total.cash + mbcashContrib;
@@ -920,7 +935,7 @@ function getReports() {
 	totalcashtd.text(totalcashContrib);
 	totalcredittd.text(totalcreditContrib);
 	totalrbuckstd.text(totalrbucksContrib);
-	totaltd.text(totalcheckContrib + totalcashContrib + totalcreditContrib + totalrbucksContrib);
+	totaltd.text(totalcheckContrib + totalcashContrib + totalcreditContrib);
 }
 
 /**
@@ -947,9 +962,39 @@ function getParticipantPayment_Contribution(contribution_id) {
 		if (typeof value == "undefined") {
 			return false;
 		}
-		return value.participant_id == participant_id;
+		return value.contribution_id == contribution_id;
 	});
 }
+
+/**
+ * Get the Membership Payments by Membership ID
+ * @param Membership_id
+ */
+function getMembershipPayment_Membership(membership_id) {
+	membership_id = parseInt(membership_id).toString();
+	return Caches.membershippayments.data.filter(function (value) {
+		if (typeof value == "undefined") {
+			return false;
+		}
+		return value.membership_id == membership_id;
+	});
+}
+
+/**
+ * Get the Membership Payments by Contribution ID 
+ * @param contribution_id
+ */
+function getMembershipPayment_Contribution(contribution_id) {
+	contribution_id = parseInt(contribution_id).toString();
+	return Caches.membershippayments.data.filter(function (value) {
+		if (typeof value == "undefined") {
+			return false;
+		}
+		return value.contribution_id == contribution_id;
+	});
+}
+
+
 
 /**
  * This initializes all the data. Call this after logging in.
@@ -1157,7 +1202,7 @@ function putMembershipTypesInPanel() {
 	});
 
 	//Discounts are typically price values that only occur once (eg. discount memberships)
-	var discountLabel = $("<label><input name='membership-type-option' type='radio' value='Discount'> Discount</label>");
+	var discountLabel = $("<label><input name='membership-type-option' type='radio' value='Discount'> Bronze</label>");
 	//Special is reserved for board members only
 	var specialLabel = $("<label><input name='membership-type-option' type='radio' value='Special'> Special</label>");
 
@@ -1200,26 +1245,28 @@ function putMembershipTypesInPanel() {
 			$("#membershipType").append(" ");
 		}
 
-		$.each(thisTypePrices, function (index, price) {
-			var is_def = "";
-			var thisPriceField = $("<label style='display:none' data-membershipcategory='" + membershiptype.category + "'></label>");
-			var thisInput = $("<input name='membership-price-field' type='radio' data-amount='" + price["amount"] + "' data-membership-terms='" + price["membership_num_terms"] + "' data-membership-type='" + price.membership_type_id + "' data-duration-unit='" + membershiptype["duration_unit"] + "' data-duration-interval='" + membershiptype["duration_interval"] + "' data-txlabel='" + membershiptype["description"] + "' data-membership-name='" + membershiptype["name"] + "'" + is_def + ">");
+		$.each(thisTypePrices, function (index, price) {			
+			if (price["is_active"] != 0) {
+				var is_def = "";
+				var thisPriceField = $("<label style='display:none' data-membershipcategory='" + membershiptype.category + "'></label>");
+				var thisInput = $("<input name='membership-price-field' type='radio' data-amount='" + price["amount"] + "' data-membership-terms='" + price["membership_num_terms"] + "' data-membership-type='" + price.membership_type_id + "' data-duration-unit='" + membershiptype["duration_unit"] + "' data-duration-interval='" + membershiptype["duration_interval"] + "' data-txlabel='" + membershiptype["description"] + "' data-membership-name='" + membershiptype["name"] + "'" + is_def + ">");
 
-			if (price["is_default"] != 0) {
-				thisLabel.find("input").prop("checked", true);
-				thisLabel.attr("data-defaultmembership", "1");
-				thisPriceField.attr("style", "");
-				thisPriceField.attr("data-defaultmembership", "1");
-				thisInput.prop("checked", true);
-				$("label[data-membershipcategory='" + membershiptype.category + "']").show();
-			} else if (thisLabel.find("input").prop("checked")) {
-				thisPriceField.attr("style", ""); //Make sure we show this option if we are part of the default group
-			};
+				if (price["is_default"] != 0) {
+					thisLabel.find("input").prop("checked", true);
+					thisLabel.attr("data-defaultmembership", "1");
+					thisPriceField.attr("style", "");
+					thisPriceField.attr("data-defaultmembership", "1");
+					thisInput.prop("checked", true);
+					$("label[data-membershipcategory='" + membershiptype.category + "']").show();
+				} else if (thisLabel.find("input").prop("checked")) {
+					thisPriceField.attr("style", ""); //Make sure we show this option if we are part of the default group
+				};
 
-			thisPriceField.append(thisInput);
-			thisPriceField.append(" " + price["label"]);
-			$("#membership-priceFields").append(thisPriceField);
-			$("#membership-priceFields").append(" ");
+				thisPriceField.append(thisInput);
+				thisPriceField.append(" " + price["label"]);
+				$("#membership-priceFields").append(thisPriceField);
+				$("#membership-priceFields").append(" ");
+			}
 		});
 	});
 	//This is the list of discounts
@@ -1253,15 +1300,39 @@ function putMembershipTypesInPanel() {
 
 //Attach a click handler to the membership-add button
 $("#membership-add").click(function (event) {
+	var dataObj = $(this).data();
+
 	if (currentContact == null) {
 		print_error("No contact loaded");
 	} else if ($(this).data("membership-type") == 0) {
 		print_error("You forgot to select a membership type");
 	} else {
-		//Prepare a transaction
-		$(this).data("startdate", $("#membership-startDate").val());
-		$(this).data("enddate", $("#membership-endDate").val());
-		prepare_member_tx($(this).data());
+		var data = {};
+		data.type = "membership";
+		data.price = parseFloat(dataObj["amount"]);
+		data.contactid = currentContact.id;
+		data.fields = {};
+
+		/*
+		 * Format for update:
+		 * membership_contact_id=3&membership_type_id=2&status_id=1&id=4&membership_end_date=2014
+		 */
+		if (currentContactMembership != null) {
+			data.fields.id = currentContactMembership.id;
+			data.fields.membership_contact_id = data.contactid;
+			data.fields.status_id = 2;
+		} else {
+			//New membership should have a start date
+			data.fields.membership_start_date = formatDate($("#membership-startDate").val(), "database");
+			data.fields.join_date = data.fields.membership_start_date;
+			data.fields.membership_source = "Doorsheet " + version;
+			data.fields.membership_contact_id = data.contactid;
+			data.fields.status_id = 1;
+		}
+		data.fields.membership_type_id = parseInt(dataObj["membershipType"]);
+		data.fields.membership_end_date = formatDate($("#membership-endDate").val(), "database");
+		//Save this transaction into the local transaction list
+		StagedTransactions.add(data);
 	}
 });
 
@@ -1310,6 +1381,10 @@ function StagedTransactions () {
 		}
 		if (transaction.price != 0 && !("fields" in transaction)) {
 			print_error("BUG: A price passed but no fields to update in the database");
+			return false;
+		}
+		if ("id" in transaction.fields && typeof transaction.fields.id == "undefined") {
+			print_error("BUG: An id passed but it was undefined");
 			return false;
 		}
 		print_debug (transaction);
@@ -1383,44 +1458,6 @@ function StagedTransactions () {
 		}
 		context.updateView();
 	};
-}
-
-/**
- * Prepare membership transaction (put it in the list to be processed)
- * @param dataObj
- */
-function prepare_member_tx(dataObj) {
-	//Make sure we're not accidentally passing objects or strings 
-	var price = parseFloat(dataObj["amount"]);
-	var memberType = parseInt(dataObj["membershipType"]);
-
-	//Name:
-	var data = {};
-	data.type = "membership";
-	data.price = price;
-	data.contactid = currentContact.id;
-	data.fields = {};
-
-	/*
-	 * membership_contact_id=3&membership_type_id=2&status_id=1&id=4&membership_end_date=2014
-	 */
-	if (currentContactMembership != null) {
-
-		data.fields.id = data.membershipId;
-		data.fields.membership_contact_id = data.contactid;
-		data.fields.status_id = 2;
-	} else {
-		//New membership should have a start date
-		data.fields.membership_start_date = formatDate($("#membership-startDate").val(), "database");
-		data.fields.join_date = data.fields.membership_start_date;
-		data.fields.membership_source = "Doorsheet " + version;
-		data.fields.membership_contact_id = data.contactid;
-		data.fields.status_id = 1;
-	}
-	data.fields.membership_type_id = memberType;
-	data.fields.membership_end_date = formatDate($("#membership-endDate").val(), "database");
-	//Save this transaction into the local transaction list
-	StagedTransactions.add(data);
 }
 
 /**
@@ -1531,6 +1568,23 @@ function getCustomValue(contactid, typeid) {
 }
 
 /**
+ * Find the contributions for a particular participant
+ * @param participant_id
+ * @returns Contributions for this Participant or empty array if not found
+ */
+function getContributions_Participant(participant_id) {
+	//First check the participant-contribution database
+	var participantpayments = getParticipantPayment_Participant (participant_id);
+	var result = [];
+	if (participantpayments.length > 0) {
+		$.each (participantpayments, function (idx, participantpayment) {
+			result.push(Caches.contributions.data[participantpayment.contribution_id]);
+		});
+	}
+	return result;
+}
+
+/**
  * Execute a particular transaction
  * @param element Object with the transaction
  * @returns {Boolean}
@@ -1581,6 +1635,16 @@ function execTransaction(element) {
 			//We are registered, update the old record
 			query.id = thisparticipant_id;
 			query.participant_id = thisparticipant_id;
+			//If there are pending contributions associated with this participant
+			//make sure to fetch it and cancel them
+			var payments = getContributions_Participant(thisparticipant_id);
+			var pendingpayments = payments.filter(function (contribution) {
+				return contribution.contribution_status_id == 2;
+			});
+			$.each(pendingpayments, function (idx, pendingpayment) {
+				//Cancel the pending payment
+				cancelContribution (pendingpayment.id, "Cancelled pending payment by Doorsheet");
+			});
 		} else {
 			//We are not yet registered, set when we registered and the default role
 			query.participant_register_date = element.fields.participant_register_date;
@@ -1640,6 +1704,41 @@ function execTransaction(element) {
 		.fail(function (jqXHR, textStatus, errorThrown) {
 			print_error("Error processing "+query.entity+": "+errorThrown+", please re-submit last "+query.entity+" transaction");
 		});
+}
+
+
+function cancelContribution (id, reason) {
+	if (reason.length < 1) {
+		print_error ("Attempted contribution cancellation without reason");
+		return false;
+	}
+	if (! parseInt(id) > 0) {
+		print_error ("BUG: Invalid Contribution ID passed");
+		return false;
+	}
+
+	var query = {};
+	query.entity = "Contribution";
+	query.action = "create";
+	query.id = id;
+	query.contribution_status_id = 3;
+	query.cancel_reason=reason;
+	query.cancel_date=formatDate("", "db-time");
+	$.ajax({
+		url: CRMRESTURL,
+		data: query,
+		type: "POST",
+		dataType: "json"})
+		.done(function(data, textStatus) {
+			if (!test_apidata_error(data, "Successfully cancelled contribution", "Error cancelling contribution")) {
+				return false;
+			}
+			logTransaction(query, textStatus);
+		})
+		.fail(function (jqXHR, textStatus, errorThrown) {
+			print_error("Error cancelling pending "+query.entity+": "+errorThrown+", please re-submit last "+query.entity+" transaction");
+		});
+
 }
 
 /**
@@ -1703,32 +1802,63 @@ function logTransaction(query, textStatus) {
 		cache = Caches.participantpayments;
 		break;
 	case "MembershipPayment":
-		return; //We don't log this (for now, this is part of contribution)
+		cache = Caches.membershippayments;
 		break;
 	case "Contribution":
 		cache = Caches.contributions;
-		query.financial_type_id = query.financial_type_id.toString();
-		query.instrument_id = query.contribution_payment_instrument_id.toString();
-		query.contribution_payment_instrument_id = query.contribution_payment_instrument_id.toString();
-		if (query.financial_type_id == "2") {
-			query.financial_type = "Member Dues";
-		} else {
-			query.financial_type = "Event Fee";
-		}		
-		if (query.instrument_id == "83" || query.instrument_id == "3") {
-			query.payment_instrument = "Cash";	
-			query.instrument_id == "83";
-		} else if (query.instrument_id == "84" || query.instrument_id == "4") {
-			query.payment_instrument = "Check";
-			query.instrument_id == "84";
-		} else if (query.instrument_id == "81" || query.instrument_id == "1") {
-			query.payment_instrument = "Credit";
-			query.instrument_id == "81";
-		} else if (query.instrument_id == "720" || query.instrument_id == "6") {
-			query.payment_instrument = "RBucKS";
-			query.instrument_id == "720";
+		if ("financial_type_id" in query) {
+			query.financial_type_id = query.financial_type_id.toString();
 		}
-		query.total_amount = parseFloat(query.total_amount).toFixed(2);
+		if ("payment_instrument_id" in query) {
+			query.instrument_id = query.payment_instrument_id.toString();
+		}
+		if ("financial_type_id" in query) {
+			if (query.financial_type_id == "2") {
+				query.financial_type = "Member Dues";
+			} else {
+				query.financial_type = "Event Fee";
+			}			
+		}
+		if ("instrument_id" in query) {
+			if (query.instrument_id == "3") {
+				query.payment_instrument = "Cash";	
+				query.instrument_id == "3";
+			} else if (query.instrument_id == "4") {
+				query.payment_instrument = "Check";
+				query.instrument_id == "4";
+			} else if (query.instrument_id == "1") {
+				query.payment_instrument = "Credit";
+				query.instrument_id == "1";
+			} else if (query.instrument_id == "6") {
+				query.payment_instrument = "RBucKS";
+				query.instrument_id == "6";
+			}
+		}
+		if ("contribution_status_id" in query) {
+			query.contribution_status_id = query.contribution_status_id.toString();
+			switch (query.contribution_status_id) {
+			case "1":
+				query.contribution_status="Completed";
+				break;
+			case "2":
+				query.contribution_status="Pending";
+			case "3":
+				query.contribution_status="Cancelled";
+				break;
+			case "4":
+				query.contribution_status="Failed";
+				break;
+			case "7":
+				query.contribution_status="Refunded";
+				break;
+			default:
+				query.contribution_status="Unknown";
+				break;
+			}
+		}
+		if ("total_amount" in query) {
+			query.total_amount = parseFloat(query.total_amount).toFixed(2);
+		}
 		url += "?q=civicrm/contact/view/contribution&reset=1&action=view&id="+query.id+"&cid="+query.contact_id+"&context=contribution&selectedChild=contribute";
 		break;
 	case "Participant":
@@ -1801,9 +1931,9 @@ function createContribution(paymentData, data_id) {
 	contribQuery.currency = "USD";
 	contribQuery.receive_date = formatDate("", "db-time");
 	contribQuery.total_amount = paymentData.price;
-	contribQuery.contribution_source = "Doorsheet Contribution v" + version;
+	contribQuery.source = "Doorsheet Contribution v" + version;
 	contribQuery.contribution_status_id = 1;
-	contribQuery.contribution_payment_instrument_id = paymentData.instrumentType;
+	contribQuery.payment_instrument_id = paymentData.instrumentType;
 
 	$.ajax({
 		url: CRMRESTURL,
@@ -1828,6 +1958,7 @@ function createContribution(paymentData, data_id) {
 			contribQuery.id = data["id"];
 
 			logTransaction(contribQuery, textStatus);
+			//Make sure we don't make 2 participant_payments
 			if (contribQuery.financial_type_id == 4) {
 				//4 = event fee
 				createParticipantPayment(data.id, data_id);
@@ -2083,7 +2214,7 @@ function login_user (username, api_key) {
 		var successMsg = "Successfully cached Contacts";
 		var errorMsg = "Error caching Contacts";
 		if (!test_apidata_error(data, successMsg, errorMsg)) {
-			this.login_fail (data['error_message'], this.api_key);
+			this.login_fail (data['error_message'], query.api_key);
 			return false;
 		}
 		Caches.contacts = new Cache ("Contact");
@@ -2092,7 +2223,7 @@ function login_user (username, api_key) {
 		this.login_success(this.username, this.api_key);
 	}).fail(function (jqXHR, textStatus, errorThrown) {
 		print_error("Error caching Contacts: " + textStatus + " - " + errorThrown);
-		this.login_fail("Error connecting to the server: "+textStatus+" - "+errorThrown);
+		this.login_fail("Error connecting to the server: "+textStatus+" - "+errorThrown, query.api_key);
 	});
 }
 
@@ -2308,12 +2439,43 @@ function putLastPaymentsInPanel () {
 
 	if (arr.length > 0) {
 		$.each(arr, function (index, value) {
-			placeholder.append("<div>"+value.financial_type+": " + value.total_amount + " (" + value.payment_instrument + ") "+ moment(value.receive_date).calendar() + "</div>");
+			var pending = "";
+			if (value.contribution_status_id != "1") {
+				pending = " (" + value.contribution_status + ")";
+			}
+			var cancelLink = $("<a id='cancel_contribution' data-contributionid='"+value.id+"' title='Click to cancel payment'><span class='glyphicon glyphicon-ban-circle'></span></a>");
+			var div = $("<div> <a href='"+BaseURL+"/index.php?q=civicrm/contact/view/contribution&reset=1&id="+value.id+"&cid="+currentContact.id+"&action=view&context=search&selectedChild=contribute' target='_blank' title='View in backend'>"+value.financial_type+":</a> " + value.total_amount + " (" + value.payment_instrument + pending + ") "+ moment(value.receive_date).calendar() + "</div>");
+			cancelLink.click(function(e) {
+				e.preventDefault();
+				var contributionid = $(this).data("contributionid");
+				$("#cancelcontribution-modal input[name=cancelcontribution-id]").val(contributionid);
+				$("#cancelcontribution-modal").modal();
+			});
+			div.prepend(cancelLink);
+			placeholder.append(div);
 		});
 	} else {
 		placeholder.append("<div>No previous payments</div>");
 	}
 }
+
+$("#cancelcontribution-confirm").click(function (e) {
+	var contributionid = $("#cancelcontribution-modal input[name=cancelcontribution-id]").val();
+	var reason = $("#cancelcontribution-modal input[name=cancelcontribution-reason]").val();
+	if (!contributionid > 0) {
+		print_error ("BUG: Invalid contribution ID passed");
+		return false;
+	}
+	if (!reason.length > 0) {
+		print_error ("No reason given, cannot cancel a contribution without a reason");
+		return false;
+	}
+	cancelContribution (contributionid, reason);
+	$("#cancelcontribution-modal").modal("hide");
+	//Empty inputs for future reuse
+	$("#cancelcontribution-modal input[name=cancelcontribution-id]").val(0);
+	$("#cancelcontribution-modal input[name=cancelcontribution-reason]").val("");
+});
 
 function putLastParticipantsInPanel () {
 	if (currentContact == null) {
@@ -2381,9 +2543,9 @@ function unlock_uiobject (uiobject) {
 }
 
 /**
- * @param dateObj
- * @param type
- * @return {String}
+ * @param dateObj Anything moment() can handle or "" or undefined for "now"
+ * @param type Choose db/database, db-time/database-time, datepicker. Anything else will return a relative date string
+ * @return {String} Returns a STRING that can be used, not an object
  */
 function formatDate(dateObj, type) {
 	//TODO: Convert this hideous thing to moment.js - moment.js already loaded!
@@ -2455,7 +2617,7 @@ function putMembershipsInPanel() {
 	//Remove previous info
 	$("#membership-info").empty();
 	$("#discountsAvailable").empty();
-	$("#membership-info").append('<a href="'+BaseURL+'index.php?q=civicrm/contact/view&reset=1&cid='+contact_id+'" target="_blank">Contact ID: ' + contact_id + '</a><br>');
+	$("#membership-info").append('<a href="'+BaseURL+'index.php?q=civicrm/contact/view&reset=1&cid='+contact_id+'" target="_blank" title="View in backend">Contact ID: ' + contact_id + '</a><br>');
 	$("#membership-info").removeClass().addClass("panel-body"); //Delete all the alert styles, restore panel-body
 	$("body").removeClass();
 
@@ -2483,6 +2645,8 @@ function putMembershipsInPanel() {
 				break;
 			case 3:
 				//Standard
+			case 10:
+				//Friend of RKS
 			case 8:
 				//Staff
 				$("#membership-info").addClass("membership-standard");
@@ -2513,8 +2677,6 @@ function putMembershipsInPanel() {
 					eventpanel.setToMemberPrice();
 				});
 				break;
-			case 10:
-				//Friend of RKS
 			case 11:
 				//OOA
 				$("#membership-info").addClass("membership-ooa");
@@ -2972,7 +3134,7 @@ $("#show-reports").click(function (event) {
 
 $("input[name='instrument-type']").click(function (event) {
 	//Change of instrument type
-	$("#submit-transaction").data("instrumentType", $(this).val());
+	$("#submit-transaction").data("instrument-type", $(this).val());
 });
 
 
@@ -3004,7 +3166,7 @@ $("#mail-report").click(function (event) {
 	query.subject = "Event Report";
 	query.body = html.html();
 	query.secret = "your-secret"; 
-	query.mail_to = "treasurer@your-domain.com";
+	query.mail_to = "treasurer@rochesterkinksociety.com";
 	$.ajax({
 		url: BaseURL + "Doorsheet/mailer.php",
 		dataType: "json", //Don't forget to say this, it will fail otherwise
@@ -3033,6 +3195,8 @@ $("#discount-add").click(function (event) {
 	data.fields.credit = parseFloat($("#discount-panel").find("input[name='credit']").val());
 	data.fields.rbucks = parseFloat($("#discount-panel").find("input[name='rbucks']").val());
 	data.fields.guestpasses = parseFloat($("#discount-panel").find("input[name='guestpasses']").val());
+
+	//Check for isNaN because sometimes those fields aren't there
 	if (!isNaN(data.fields.credit) && data.fields.credit > 0) {
 		data.price = data.price - data.fields.credit;
 	} else {
